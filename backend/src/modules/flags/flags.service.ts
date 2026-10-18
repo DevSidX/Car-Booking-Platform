@@ -6,7 +6,16 @@ import type { AuditService } from '../audit/audit.service';
 import { FeatureFlag } from './featureFlag.model';
 
 /** Every switch the apps and the server know about. Unknown keys are refused, so typos cannot hide a feature. */
-export const FLAG_KEYS = ['SOS', 'TRIP_SHARING', 'SUPPORT_TICKETS', 'RATINGS', 'COUPONS'] as const;
+export const FLAG_KEYS = [
+  'SOS',
+  'TRIP_SHARING',
+  'SUPPORT_TICKETS',
+  'RATINGS',
+  'COUPONS',
+  'TIPS',
+  'WALLET',
+  'CORPORATE',
+] as const;
 export type FlagKey = (typeof FLAG_KEYS)[number];
 export type FlagDefaults = Record<FlagKey, boolean>;
 

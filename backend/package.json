@@ -24,9 +24,11 @@
     "postman": "tsx scripts/gen-postman.ts",
     "loadtest": "tsx scripts/loadtest.ts",
     "loadtest:rides": "tsx scripts/loadtest-rides.ts",
-    "gate": "vitest run --maxWorkers=3 tests/gate.test.ts tests/rbac-matrix.test.ts tests/security.test.ts tests/security-limits.test.ts tests/dispatch-race.test.ts tests/rides.test.ts tests/finance-payments.test.ts tests/finance-ledger.test.ts tests/finance-cash.test.ts tests/safety.test.ts tests/authz.test.ts tests/contract.test.ts tests/monitor.test.ts"
+    "loadtest:local": "tsx scripts/localstack.ts",
+    "gate": "vitest run --maxWorkers=3 tests/gate.test.ts tests/rbac-matrix.test.ts tests/security.test.ts tests/security-limits.test.ts tests/dispatch-race.test.ts tests/rides.test.ts tests/finance-payments.test.ts tests/finance-ledger.test.ts tests/finance-cash.test.ts tests/tips-wallet.test.ts tests/payouts.test.ts tests/safety.test.ts tests/authz.test.ts tests/contract.test.ts tests/monitor.test.ts"
   },
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.8",
     "express": "^5.3.0",
@@ -36,8 +38,10 @@
     "jsonwebtoken": "^9.0.3",
     "libphonenumber-js": "^1.13.15",
     "mongoose": "^9.11.2",
+    "nodemailer": "^10.1.2",
     "pino": "^10.4.0",
     "pino-http": "^11.0.0",
+    "rate-limit-redis": "^6.0.1",
     "socket.io": "^4.8.4",
     "zod": "^4.6.7"
   },
@@ -47,6 +51,7 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.19.43",
+    "@types/nodemailer": "^8.0.2",
     "@types/supertest": "^7.2.1",
     "eslint": "^10.13.0",
     "mongodb-memory-server": "^11.3.0",

@@ -1,5 +1,6 @@
 import { Router, type Request } from 'express';
 import rateLimit from 'express-rate-limit';
+import { limiterStore } from '../../middleware/limiterStore';
 import { z } from 'zod';
 import { actorFrom } from '../../common/actor';
 import { AppError } from '../../common/errors';
@@ -79,6 +80,7 @@ export function safetyRouter(ctx: ModuleContext, safety: SafetyService): Router 
   );
   // The one endpoint anyone may open (no login): limited per IP so tokens cannot be guessed at speed.
   const publicLimiter = rateLimit({
+    ...limiterStore('public-trips'),
     windowMs: 60_000,
     limit: 60,
     standardHeaders: true,

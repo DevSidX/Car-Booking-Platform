@@ -54,10 +54,14 @@ describe('system health', () => {
     expect(res.body.data.checks.map((c: { name: string }) => c.name)).toEqual([
       'ledger_balanced',
       'dispatch_stuck',
+      'rides_overrunning',
+      'corporate_invoices_overdue',
+      'scheduled_rides_overdue',
       'sos_unacknowledged',
       'push_backlog',
       'webhooks_unfinished',
       'payments_not_in_ledger',
+      'payouts_need_attention',
       'error_rate',
       'jobs_alive',
     ]);

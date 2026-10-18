@@ -25,6 +25,13 @@ import { FareConfig } from '../pricing/fareConfig.model';
 import { MAX_TRIP_METERS, MIN_TRIP_METERS, type QuotesService } from '../quotes/quotes.service';
 import { routeThrough } from '../quotes/route';
 import { Ride } from './ride.model';
+import { trailMeters } from '../trips/tripDistance';
+import {
+  outstationFinal,
+  rentalFinal,
+  type OutstationSnapshot,
+  type RentalSnapshot,
+} from '../trips/tripFares';
 import { historyRow, receiptView, rideView, type Viewer } from './rides.views';
 import type { Notifier } from '../../realtime/notifier';
 import type {
@@ -124,11 +131,13 @@ export function createRidesService(deps: {
     type: 'CANCELLATION' | 'NO_SHOW',
     amountPaise: number,
     at: Date,
+    method?: string | null,
   ): Record<string, unknown> =>
     amountPaise > 0
       ? {
           fee: { type, amountPaise, status: 'DUE', at },
-          paymentStatus: 'DUE',
+          // A company-billed ride is never "due" from the rider.
+          paymentStatus: method === 'CORPORATE' ? 'BILLED' : 'DUE',
           'receipt.number': publicId('rcpt'),
           'receipt.issuedAt': at,
         }
@@ -144,7 +153,9 @@ export function createRidesService(deps: {
     options: { chargeRider?: boolean } = {},
   ) {
     const at = now();
-    const before = await Booking.findOne(filter).select('status assignedAt policy').lean();
+    const before = await Booking.findOne(filter)
+      .select('status assignedAt policy paymentMethod')
+      .lean();
     // Only the rider can be charged, and only by the rules frozen onto the booking when they booked.
     const assessment =
       options.chargeRider && before
@@ -162,7 +173,9 @@ export function createRidesService(deps: {
           ...(reason.note ? { note: reason.note } : {}),
           at,
         },
-        ...(assessment ? feeFields('CANCELLATION', assessment.amountPaise, at) : {}),
+        ...(assessment
+          ? feeFields('CANCELLATION', assessment.amountPaise, at, before?.paymentMethod)
+          : {}),
       },
     });
     if (!cancelled) throw invalidState('This ride can no longer be cancelled.');
@@ -449,46 +462,115 @@ export function createRidesService(deps: {
         capSeconds: config.waitingCapSeconds,
       });
 
-      const finalFare = cfg
-        ? {
-            currency: snapshot.currency ?? 'INR',
-            configVersion: cfg.version,
-            basis: 'QUOTED_DISTANCE_MEASURED_TIME',
-            billableDistanceMeters: snapshot.estimatedDistanceMeters,
-            billableDurationSeconds: billableDuration,
-            measuredDurationSeconds: measured,
-            waiting: { ...waiting, ratePerMinutePaise: cfg.waitingPerMinutePaise ?? 0 },
-            breakdown: calculateFare(
-              {
-                baseFarePaise: cfg.baseFarePaise,
-                perKmPaise: cfg.perKmPaise,
-                perMinutePaise: cfg.perMinutePaise,
-                minimumFarePaise: cfg.minimumFarePaise,
-                roundingMode: (cfg.roundingMode ?? 'NEAREST_RUPEE') as 'NEAREST_RUPEE' | 'NONE',
-              },
-              snapshot.estimatedDistanceMeters,
-              billableDuration,
-              {
-                billableSeconds: waiting.billableSeconds,
-                perMinutePaise: cfg.waitingPerMinutePaise ?? 0,
-              },
-            ),
+      const tripKind = (booking as { tripKind?: string | null }).tripKind ?? 'CITY';
+      let tripFinal: Record<string, unknown> | null = null;
+      if (tripKind !== 'CITY') {
+        // Rentals and outstation trips are billed on what the server saw: the time on the clock and the
+        // distance of the recorded route trail. The odometer the driver typed in is kept only as evidence.
+        const end = input.endLocation
+          ? { lat: input.endLocation.lat, lng: input.endLocation.lng, at: t }
+          : null;
+        // The trip starts at the pickup point, at the moment the OTP was verified.
+        const [pickupLng, pickupLat] = booking.pickup.location!.coordinates as [number, number];
+        const measuredMeters = await trailMeters(booking._id, {
+          start: { lat: pickupLat, lng: pickupLng, at: ride.startedAt },
+          end,
+          maxSpeedMps: config.maxSpeedMps,
+          maxAccuracyMeters: config.maxAccuracyMeters,
+          bookingStatus: 'IN_PROGRESS',
+        });
+        const rules = {
+          rentalGraceMinutes: config.rentalGraceMinutes,
+          rentalGraceKm: config.rentalGraceKm,
+          oneWayDetourBp: config.oneWayDetourBp,
+        };
+        const f =
+          tripKind === 'RENTAL'
+            ? rentalFinal(
+                (booking as unknown as { rental: RentalSnapshot }).rental,
+                { elapsedSeconds: measured, measuredMeters },
+                rules,
+              )
+            : outstationFinal(
+                (booking as unknown as { outstation: OutstationSnapshot }).outstation,
+                { startedAt: ride.startedAt, endedAt: t, measuredMeters },
+                rules,
+              );
+        tripFinal = {
+          currency: snapshot.currency ?? 'INR',
+          configVersion: snapshot.configVersion ?? null,
+          basis:
+            tripKind === 'RENTAL' ? 'RENTAL_PACKAGE_AND_USAGE' : 'OUTSTATION_DISTANCE_AND_DAYS',
+          billableDistanceMeters: f.billableDistanceMeters,
+          billableDurationSeconds: f.billableDurationSeconds,
+          measuredDurationSeconds: measured,
+          measuredDistanceMeters: measuredMeters,
+          waiting: { ...waiting, ratePerMinutePaise: 0, billableSeconds: 0 },
+          breakdown: f.breakdown,
+          labels: f.labels,
+          details: f.details,
+          extraLines: f.extraLines,
+        };
+        const reported = input.odometerEndMeters;
+        const reportedStart = (ride as { reportedOdometerStartMeters?: number | null })
+          .reportedOdometerStartMeters;
+        if (reported !== undefined && reportedStart != null) {
+          const driven = reported - reportedStart;
+          if (Math.abs(driven - measuredMeters) > Math.max(2000, measuredMeters * 0.15)) {
+            await record({
+              bookingId: booking._id,
+              type: 'ODOMETER_MISMATCH',
+              actorType: 'SYSTEM',
+              at: t,
+              metadata: { reportedMeters: driven, measuredMeters },
+            });
           }
-        : {
-            // Config no longer available: honour the price the customer was quoted.
-            currency: snapshot.currency ?? 'INR',
-            configVersion: snapshot.configVersion ?? null,
-            basis: 'QUOTED_ESTIMATE',
-            billableDistanceMeters: snapshot.estimatedDistanceMeters,
-            billableDurationSeconds: snapshot.estimatedDurationSeconds,
-            measuredDurationSeconds: measured,
-            waiting: { ...waiting, ratePerMinutePaise: 0, billableSeconds: 0 },
-            breakdown: snapshot.breakdown,
-          };
+        }
+      }
+
+      const finalFare = tripFinal
+        ? tripFinal
+        : cfg
+          ? {
+              currency: snapshot.currency ?? 'INR',
+              configVersion: cfg.version,
+              basis: 'QUOTED_DISTANCE_MEASURED_TIME',
+              billableDistanceMeters: snapshot.estimatedDistanceMeters,
+              billableDurationSeconds: billableDuration,
+              measuredDurationSeconds: measured,
+              waiting: { ...waiting, ratePerMinutePaise: cfg.waitingPerMinutePaise ?? 0 },
+              breakdown: calculateFare(
+                {
+                  baseFarePaise: cfg.baseFarePaise,
+                  perKmPaise: cfg.perKmPaise,
+                  perMinutePaise: cfg.perMinutePaise,
+                  minimumFarePaise: cfg.minimumFarePaise,
+                  roundingMode: (cfg.roundingMode ?? 'NEAREST_RUPEE') as 'NEAREST_RUPEE' | 'NONE',
+                },
+                snapshot.estimatedDistanceMeters,
+                billableDuration,
+                {
+                  billableSeconds: waiting.billableSeconds,
+                  perMinutePaise: cfg.waitingPerMinutePaise ?? 0,
+                },
+              ),
+            }
+          : {
+              // Config no longer available: honour the price the customer was quoted.
+              currency: snapshot.currency ?? 'INR',
+              configVersion: snapshot.configVersion ?? null,
+              basis: 'QUOTED_ESTIMATE',
+              billableDistanceMeters: snapshot.estimatedDistanceMeters,
+              billableDurationSeconds: snapshot.estimatedDurationSeconds,
+              measuredDurationSeconds: measured,
+              waiting: { ...waiting, ratePerMinutePaise: 0, billableSeconds: 0 },
+              breakdown: snapshot.breakdown,
+            };
       // The full fare is what the driver's pay and the platform's cut are based on. A coupon (rule
       // frozen at booking) lowers only what the RIDER owes; the platform funds the difference.
-      const grossFarePaise = (finalFare.breakdown as { estimatedTotalPaise: number })
-        .estimatedTotalPaise;
+      const grossFarePaise = (
+        finalFare['breakdown' as keyof typeof finalFare] as { estimatedTotalPaise: number }
+      ).estimatedTotalPaise;
       const discountPaise = booking.coupon ? computeDiscount(booking.coupon, grossFarePaise) : 0;
       const finalFarePaise = grossFarePaise - discountPaise;
       Object.assign(finalFare, {
@@ -505,7 +587,7 @@ export function createRidesService(deps: {
           // Completing never marks anything PAID; payment is its own state machine.
           set: {
             completedAt: t,
-            paymentStatus: 'DUE',
+            paymentStatus: booking.paymentMethod === 'CORPORATE' ? 'BILLED' : 'DUE',
             finalFarePaise,
             grossFarePaise,
             discountPaise,
@@ -548,7 +630,8 @@ export function createRidesService(deps: {
       return {
         rideId: ride.publicId,
         status: 'COMPLETED' as const,
-        paymentStatus: 'DUE' as const,
+        paymentStatus: (booking.paymentMethod === 'CORPORATE' ? 'BILLED' : 'DUE') as
+          'BILLED' | 'DUE',
         fare: finalFare,
         finalFarePaise,
         grossFarePaise,
@@ -626,7 +709,14 @@ export function createRidesService(deps: {
       if (!owned) throw new AppError('NOT_FOUND', 'Booking not found.');
       const cancelled = await cancelBooking(
         { publicId: bookingPublicId, customerId },
-        ['REQUESTED', 'DISPATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'DRIVER_ARRIVED'],
+        [
+          'SCHEDULED',
+          'REQUESTED',
+          'DISPATCHING',
+          'DRIVER_ASSIGNED',
+          'DRIVER_ARRIVING',
+          'DRIVER_ARRIVED',
+        ],
         'CUSTOMER',
         customerId,
         input,
@@ -650,6 +740,7 @@ export function createRidesService(deps: {
       const b = await Booking.findOne({ publicId: bookingPublicId, customerId }).lean();
       if (!b) throw new AppError('NOT_FOUND', 'Booking not found.');
       const canCancel = [
+        'SCHEDULED',
         'REQUESTED',
         'DISPATCHING',
         'DRIVER_ASSIGNED',
@@ -696,7 +787,7 @@ export function createRidesService(deps: {
         { _id: booking._id, assignedDriverId: ride.driverId },
         ['DRIVER_ARRIVED'],
         'NO_SHOW',
-        { set: feeFields('NO_SHOW', policy.noShowFeePaise, t) },
+        { set: feeFields('NO_SHOW', policy.noShowFeePaise, t, booking.paymentMethod) },
       );
       if (!moved) throw invalidState();
       await Ride.updateOne({ _id: ride._id }, { noShowAt: t });

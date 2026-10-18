@@ -51,4 +51,40 @@ Metrics (latency, dispatch timeouts, GPS staleness, payment failures, webhook la
   - Riders only: `BASE_URL=https://<staging> FIXED_OTP=<code> RIDERS=200 CONCURRENCY=40 npm run loadtest`. Sign-in, quote, book, cancel, live connection.
   - Full rides: `BASE_URL=... FIXED_OTP=<code> ADMIN_PHONE=<staff phone> DRIVERS=20 RIDERS=30 DURATION_SECONDS=120 npm run loadtest:rides`. Creates approved drivers through the staff API, drivers send locations and answer offers, riders book, every ride is driven to completion. Reports time to assign a driver, rides completed, location updates and speed per endpoint. The staff account must exist (seed) and sign in with the fixed OTP.
   - Both exit non-zero above 1% server errors/no-answer (4xx rule answers and rate limits are not counted as errors).
+- **Local load test (one command):** `npm run loadtest:local` starts an in-memory database, the real server with `LOAD_TEST_MODE=true`, runs both load tests and writes `load-results.json` (ignored by git). Sizes by environment: `RIDERS`, `CONCURRENCY`, `DRIVERS`, `RIDE_RIDERS`, `DURATION_SECONDS`, `SKIP_RIDERS=true`. Results and findings: `docs/load-test-results.md`.
+- **LOAD_TEST_MODE=true** lifts every rate limit (needed to load test staging; the server refuses to start with it in production).
 - **Release gate:** `npm run gate`; checklist in `docs/release-gate.md`.
+
+## Tips, wallet and payouts additions
+- **Payout service (RazorpayX).** `PAYOUTS_DRIVER=razorpayx` plus `RAZORPAYX_KEY_ID`, `RAZORPAYX_KEY_SECRET`, `RAZORPAYX_ACCOUNT_NUMBER` (your RazorpayX current account), `RAZORPAYX_WEBHOOK_SECRET`. Webhook URL: `https://<host>/api/v1/webhooks/razorpayx` for `payout.processed`, `payout.failed`, `payout.reversed`, `payout.rejected`. `mock` (default) sends nothing; in development `POST /dev/payouts/{id}/complete` (finance login) finishes a mock payout. NOT verified live: first check is one small payout to an account you control, using a RazorpayX TEST account.
+- **Automatic payouts.** `AUTO_PAYOUTS=true`: the finance job (every minute) pays approved settlements whose driver has a verified account, at most 20 per run, and stops retrying after 3 failures (a person looks). Default `false`: finance presses "pay" (`POST /admin/settlements/{id}/payout`). Approval of the settlement stays a person's decision either way.
+- **Repair job** (`payouts.reconcile`, inside the finance job): re-sends payouts that never got an answer (same idempotency key, so never twice), asks the provider about payouts "on their way" for 10+ minutes (a missed webhook), finishes settlements whose payout is paid.
+- **Monitor** check `payouts_need_attention`: a payout unanswered, on its way over a day, or failed and not retried.
+- **Wallet** has no extra settings (limits are code defaults in `FinanceConfig`). **Run `npm run indexes`** after deploying (new collections: tips, wallets, payouts, payout accounts).
+- **Legal check before real use:** holding rider money in a wallet may fall under RBI rules for prepaid payment instruments (a closed wallet usable only for your own services is generally lighter, but confirm with a lawyer/accountant before enabling `WALLET` in production). Tips and payouts need the same tax review as fares.
+
+## Scheduled rides and analytics additions
+- **Job:** `scheduled rides` every 30 s (reminders, start the search near pickup, cancel rides missed by 30+ minutes). Runs on every instance safely (conditional updates).
+- **Monitor check** `scheduled_rides_overdue`: a SCHEDULED ride 10+ minutes past its pickup time means the job is not working. Runbook entry added.
+- **Settings** (`DispatchConfig`; confirmed by the owner 2026-10-18; change in code): min lead 30 min, max 7 days ahead, search starts 20 min before pickup, reminder 60 min before, missed after 30 min, 5 waiting rides per rider.
+- **Analytics** are computed live from the bookings, payments and tips collections. Fine for a pilot; with large volume add a daily rollup table (not built).
+
+## Corporate accounts additions
+- **Repair job:** the finance job (every minute) also posts any company payment that was saved but never reached the ledger (`corporate.reconcile`).
+- **Monitor check** `corporate_invoices_overdue`: an issued invoice past its due date and unpaid (see the runbook).
+- **No settings to set.** Defaults are in code / chosen when finance creates the company. Run `npm run indexes` after deploying (new collections: companies, memberships, invoices, invoice counters).
+- Tax (GST) is **not calculated or shown** on invoices. Get the rules from an accountant before sending invoices to real companies.
+
+## Staff login, email, storage and privacy additions
+- **Email** (`EMAIL_DRIVER=smtp` + `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`): used for staff invitations and password resets (and later invoices). `mock` (default) only records. NOT verified against a real mail server: first check is a staff invitation to an address you can read.
+- **Staff login settings:** `STAFF_OTP_LOGIN` (default true outside production; production refuses true), `STAFF_REFRESH_TTL_HOURS` (12), `STAFF_PORTAL_URL` (the admin panel address used in email links). First super admin: set `SEED_ADMIN_PHONE` and `SEED_ADMIN_EMAIL`, run `npm run seed`, and open the printed one-time setup link.
+- **File storage** (`STORAGE_DRIVER=s3` + `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION` (`auto` for Cloudflare R2), `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PATH_STYLE` (true for R2/MinIO)): any S3-compatible bucket. Make the bucket PRIVATE and set a CORS rule allowing PUT from the apps if a web client uploads. The signing is checked against AWS's published example; NOT verified against a real bucket: first check is one real upload through a signed link.
+- **Privacy job:** the finance job (every minute) also carries out due account deletions and finishes cut-short ones. `npm run indexes` after deploying (new: staff credentials; a user index).
+- **Retention policy to decide:** which records are kept after deletion and for how long (money records and invoices for the legal period; driver KYC documents; support tickets). The code keeps money records and driver KYC documents and removes the rest.
+
+## Added in the backend completion pass
+- **Redis (optional, `REDIS_URL`):** shared rate-limit counts and live updates across several server instances. Fails open: if Redis is down the API keeps running. Verify on staging with two instances before relying on it.
+- **Invoice tax and bonus settings:** `INVOICE_TAX_BP`, `INVOICE_TAX_LABEL`, `SELLER_*`, wallet bonus settings (decisions D116, D117).
+- **Trip settings** (code defaults in `dispatch.config.ts`): rental grace 10 min / 2 km, one-way detour 20%, outstation max 30 days.
+- **New collections:** `RentalPackage`, `OutstationRate`, `StaffCredential`: run `npm run indexes` after deploying.
+- **New health check:** `rides_overrunning` (a city ride in progress for over 6 hours).

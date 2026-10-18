@@ -38,6 +38,18 @@ export const ErrorCodes = {
   DRIVER_NOT_ELIGIBLE: { status: 403, message: 'You are not eligible to take rides right now.' },
   OFFER_UNAVAILABLE: { status: 409, message: 'This ride offer is no longer available.' },
   NOT_AT_PICKUP: { status: 422, message: 'You are not close enough to the pickup point.' },
+  CORPORATE_NOT_ALLOWED: {
+    status: 403,
+    message: 'You cannot use a company account for this ride.',
+  },
+  CORPORATE_LIMIT_EXCEEDED: {
+    status: 422,
+    message: 'This ride is over a limit set by your company.',
+  },
+  INSUFFICIENT_WALLET_BALANCE: {
+    status: 402,
+    message: 'Your wallet balance is not enough. Add money or pay another way.',
+  },
   FEATURE_DISABLED: { status: 403, message: 'This feature is not available right now.' },
   NOT_AT_STOP: { status: 422, message: 'You are not close enough to this stop.' },
   NO_SHOW_TOO_EARLY: {

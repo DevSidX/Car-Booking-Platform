@@ -137,7 +137,7 @@ describe('creating a booking', () => {
     const q = await quote();
     for (const body of [
       { paymentMethod: 'BITCOIN' },
-      { rideType: 'SCHEDULED' },
+      { rideType: 'RENTAL' },
       { pickup: { ...CP, contactPhone: '123' } },
       { notes: 'x'.repeat(301) },
       // More than 3 stops is never valid.

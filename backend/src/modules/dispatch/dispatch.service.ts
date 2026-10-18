@@ -65,11 +65,19 @@ export function createDispatchService(deps: {
     booking: {
       categoryId: Types.ObjectId;
       pickup: { location?: { coordinates: number[] } | null };
+      tripKind?: string | null;
     },
     excludeDriverIds: Types.ObjectId[],
   ): Promise<Candidate[]> {
     const pickup = booking.pickup.location!;
     const freshSince = new Date(now().getTime() - config.locationFreshMs);
+    // A driver already holding a live offer for another ride is not offered this one too: they can
+    // take only one, and this rider would wait out the whole offer window for nothing.
+    const holdingOffer = await RideOffer.distinct('driverId', {
+      status: 'PENDING',
+      expiresAt: { $gt: now() },
+    });
+    const skip = [...excludeDriverIds, ...(holdingOffer as Types.ObjectId[])];
 
     for (const radius of config.radiusStagesMeters) {
       // $geoNear must be the first stage; aggregation does not cast, so ids/dates are passed typed.
@@ -91,9 +99,12 @@ export function createDispatchService(deps: {
               approvalStatus: 'APPROVED',
               onlineStatus: 'ONLINE',
               activeRideId: null,
+              // Long trips only go to drivers who said they take them.
+              ...(booking.tripKind === 'RENTAL' ? { acceptsRentals: { $ne: false } } : {}),
+              ...(booking.tripKind === 'OUTSTATION' ? { acceptsOutstation: true } : {}),
               locationUpdatedAt: { $gte: freshSince },
               currentVehicleId: { $ne: null },
-              _id: { $nin: excludeDriverIds },
+              _id: { $nin: skip },
             },
           },
         },
@@ -218,7 +229,15 @@ export function createDispatchService(deps: {
       if (candidates.length === 0) {
         // Keep waiting for drivers to come online until the search window closes.
         const started = booking.dispatch?.startedAt?.getTime() ?? t.getTime();
-        if (t.getTime() - started >= config.searchWindowMs) await giveUp(bookingId);
+        // A ride booked for later is searched for until its pickup time (plus a little), not just
+        // for a minute: the search starts early on purpose, and drivers come online meanwhile.
+        const window = booking.scheduledFor
+          ? Math.max(
+              config.searchWindowMs,
+              booking.scheduledFor.getTime() + config.scheduleSearchGraceMs - started,
+            )
+          : config.searchWindowMs;
+        if (t.getTime() - started >= window) await giveUp(bookingId);
         return;
       }
 
@@ -272,6 +291,26 @@ export function createDispatchService(deps: {
       { status: 'WITHDRAWN', respondedAt: now() },
     );
     await notifier.offersClosed(open, reason);
+  }
+
+  /**
+   * A driver who has taken a ride can take no other: close their remaining offers at once, so those
+   * riders are offered to someone else now instead of after the offer window runs out.
+   */
+  async function withdrawDriverOffers(driverId: Types.ObjectId, exceptOfferId: Types.ObjectId) {
+    const open = await RideOffer.find({
+      driverId,
+      status: 'PENDING',
+      _id: { $ne: exceptOfferId },
+    })
+      .select('_id publicId driverId')
+      .lean();
+    if (open.length === 0) return;
+    await RideOffer.updateMany(
+      { _id: { $in: open.map((o) => o._id) }, status: 'PENDING' },
+      { status: 'WITHDRAWN', respondedAt: now() },
+    );
+    await notifier.offersClosed(open, 'WITHDRAWN');
   }
 
   /** Free a driver's active-ride lock, but only if it is still held for this booking. */
@@ -526,6 +565,18 @@ export function createDispatchService(deps: {
             pickupDistanceMeters: o.pickupDistanceMeters ?? null,
             pickupEtaSeconds: o.pickupEtaSeconds ?? null,
             estimatedFarePaise: b.estimatedFarePaise,
+            scheduledFor: b.scheduledFor ?? null,
+            tripKind: b.tripKind ?? 'CITY',
+            rental: b.rental
+              ? { name: b.rental.name, hours: b.rental.hours, includedKm: b.rental.includedKm }
+              : null,
+            outstation: b.outstation
+              ? {
+                  tripType: b.outstation.tripType,
+                  days: b.outstation.days,
+                  estimatedKm: b.outstation.estimatedKm,
+                }
+              : null,
             paymentMethod: b.paymentMethod,
             currency: 'INR',
           },
@@ -654,6 +705,8 @@ export function createDispatchService(deps: {
           throw new AppError('OFFER_UNAVAILABLE');
         throw new AppError('RIDE_ALREADY_ASSIGNED');
       }
+
+      await withdrawDriverOffers(profile._id, offer._id);
 
       // The pickup OTP is derived from this nonce + a server secret and is never stored.
       const nonce = randomBytes(8).toString('hex');

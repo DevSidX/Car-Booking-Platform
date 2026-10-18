@@ -8,6 +8,9 @@
  *   RIDER_RECEIVABLE:<id>   what a rider owes us (positive); negative = we hold their credit
  *   DRIVER_PAYABLE:<id>     what we owe a driver (credit, so negative)
  *   DRIVER_CASH:<id>        cash a driver has collected from riders and not yet handed over
+ *   WALLET:<id>             a rider's wallet (credit, so negative = the balance we hold for them)
+ *   CORPORATE_RECEIVABLE:<id> what a company owes us for rides billed to it (positive)
+ *   TAX_PAYABLE             tax we have charged on invoices and must pass on (credit, so negative)
  *   REFUNDS / WRITE_OFFS / WAIVED_FEES / PROMOTIONS   money the platform gave up (promotions = coupon discounts)
  */
 export const Accounts = {
@@ -19,6 +22,9 @@ export const Accounts = {
   waivedFees: 'WAIVED_FEES',
   promotions: 'PROMOTIONS',
   riderReceivable: (customerId: string) => `RIDER_RECEIVABLE:${customerId}`,
+  wallet: (customerId: string) => `WALLET:${customerId}`,
+  taxPayable: 'TAX_PAYABLE',
+  corporateReceivable: (companyId: string) => `CORPORATE_RECEIVABLE:${companyId}`,
   driverPayable: (driverId: string) => `DRIVER_PAYABLE:${driverId}`,
   driverCash: (driverId: string) => `DRIVER_CASH:${driverId}`,
 } as const;

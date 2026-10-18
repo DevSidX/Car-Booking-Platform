@@ -54,6 +54,32 @@ export type DispatchConfig = {
   waitingCapSeconds: number;
   /** Stops allowed on one booking. */
   maxStops: number;
+  /** A scheduled ride must be booked at least this long before pickup... */
+  scheduleMinLeadMs: number;
+  /** ...and at most this far ahead. */
+  scheduleMaxAheadMs: number;
+  /** The search for a driver starts this long before the pickup time. */
+  scheduleSearchLeadMs: number;
+  /** The rider is reminded this long before pickup (only if booked earlier than that). */
+  scheduleReminderLeadMs: number;
+  /** A scheduled ride nobody started by this long after its time is cancelled by the system. */
+  scheduleMissedGraceMs: number;
+  /** Scheduled rides one rider may have waiting at a time. */
+  maxScheduledPerRider: number;
+  /** A ride for later keeps being searched until its pickup time plus this. */
+  scheduleSearchGraceMs: number;
+  /** One rider's scheduled rides must be at least this far apart. */
+  scheduleOverlapMs: number;
+  /** A rental may run this many minutes over its hours before extra time is charged... */
+  rentalGraceMinutes: number;
+  /** ...and this many km over its included distance. */
+  rentalGraceKm: number;
+  /** One-way outstation: the real distance is charged only if it is this much more than quoted (2000 = 20%). */
+  oneWayDetourBp: number;
+  /** The longest round trip that can be booked, in days. */
+  outstationMaxDays: number;
+  /** A ride still in progress after this many hours (rentals and outstation: beyond their booked time) is flagged. */
+  tripOverrunHours: number;
 };
 
 export const defaultDispatchConfig: DispatchConfig = {
@@ -84,4 +110,17 @@ export const defaultDispatchConfig: DispatchConfig = {
   maxDestinationChanges: 3,
   waitingCapSeconds: 30 * 60,
   maxStops: 3,
+  scheduleMinLeadMs: 30 * 60_000,
+  scheduleMaxAheadMs: 7 * 86_400_000,
+  scheduleSearchLeadMs: 20 * 60_000,
+  scheduleReminderLeadMs: 60 * 60_000,
+  scheduleMissedGraceMs: 30 * 60_000,
+  maxScheduledPerRider: 5,
+  scheduleSearchGraceMs: 10 * 60_000,
+  scheduleOverlapMs: 30 * 60_000,
+  rentalGraceMinutes: 10,
+  rentalGraceKm: 2,
+  oneWayDetourBp: 2000,
+  outstationMaxDays: 30,
+  tripOverrunHours: 6,
 };

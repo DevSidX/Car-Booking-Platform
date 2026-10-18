@@ -1,8 +1,12 @@
 import type { Logger } from 'pino';
 import { Booking } from '../bookings/booking.model';
+import { Ride } from '../rides/ride.model';
 import type { LedgerService } from '../ledger/ledger.service';
 import { Notification } from '../notifications/notification.model';
+import { Invoice } from '../corporate/corporate.models';
 import { Payment } from '../payments/payment.model';
+import { Payout } from '../payouts/payout.model';
+import { Settlement } from '../settlements/settlement.model';
 import { WebhookEvent } from '../payments/webhookEvent.model';
 import { SafetyIncident } from '../safety/safety.models';
 
@@ -18,6 +22,10 @@ export type Check = {
 export type MonitorConfig = {
   /** A search that has been running this long is stuck (the search itself gives up after a few minutes). */
   stuckDispatchMs: number;
+  /** A city ride still in progress after this long was probably never ended (rentals and outstation trips are expected to run long). */
+  cityRideOverrunMs: number;
+  /** A scheduled ride this far past its pickup time still waiting means the job that starts them is not working. */
+  scheduledOverdueMs: number;
   /** An SOS still OPEN this long means escalation did not work either. */
   unackedSosMs: number;
   /** Push messages waiting longer than this are not being delivered. */
@@ -36,6 +44,8 @@ export type MonitorConfig = {
 
 export const defaultMonitorConfig: MonitorConfig = {
   stuckDispatchMs: 10 * 60_000,
+  cityRideOverrunMs: 6 * 3_600_000,
+  scheduledOverdueMs: 10 * 60_000,
   unackedSosMs: 5 * 60_000,
   pushBacklogMs: 5 * 60_000,
   moneyGraceMs: 10 * 60_000,
@@ -98,6 +108,43 @@ export function createMonitorService(deps: {
         `${n} booking(s) have been searching for a driver for more than ${config.stuckDispatchMs / 60_000} minutes.`,
     );
 
+    const longRides = await Ride.find({
+      startedAt: { $lte: ago(config.cityRideOverrunMs) },
+      completedAt: null,
+    })
+      .select('bookingId')
+      .limit(500)
+      .lean();
+    add(
+      'rides_overrunning',
+      longRides.length === 0
+        ? 0
+        : await Booking.countDocuments({
+            _id: { $in: longRides.map((r) => r.bookingId) },
+            status: 'IN_PROGRESS',
+            tripKind: { $nin: ['RENTAL', 'OUTSTATION'] },
+          }),
+      (n) =>
+        `${n} city ride(s) have been in progress for more than ${config.cityRideOverrunMs / 3_600_000} hours. The driver may have forgotten to end them.`,
+    );
+
+    add(
+      'corporate_invoices_overdue',
+      await Invoice.countDocuments({ status: 'ISSUED', dueAt: { $lt: now() } }),
+      (n) =>
+        `${n} company invoice(s) are past their due date and unpaid. See GET /admin/corporate-invoices?overdue=true.`,
+    );
+
+    add(
+      'scheduled_rides_overdue',
+      await Booking.countDocuments({
+        status: 'SCHEDULED',
+        scheduledFor: { $lte: ago(config.scheduledOverdueMs) },
+      }),
+      (n) =>
+        `${n} scheduled ride(s) are past their pickup time and the search never started. Check the scheduled-rides job.`,
+    );
+
     add(
       'sos_unacknowledged',
       await SafetyIncident.countDocuments({
@@ -136,6 +183,35 @@ export function createMonitorService(deps: {
       }),
       (n) =>
         `${n} paid payment(s) are not recorded in the ledger after ${config.moneyGraceMs / 60_000} minutes.`,
+    );
+
+    // A payout nobody has an answer for, one that has been "on its way" over a day, or a settlement
+    // whose payout failed and was not retried: a person has to look.
+    const [unanswered, slow, failed] = await Promise.all([
+      Payout.countDocuments({ status: 'CREATED', updatedAt: { $lte: ago(config.moneyGraceMs) } }),
+      Payout.countDocuments({ status: 'PROCESSING', updatedAt: { $lte: ago(24 * 3_600_000) } }),
+      (async () => {
+        const rows = await Payout.find({ status: { $in: ['FAILED', 'REVERSED'] } })
+          .sort({ createdAt: -1 })
+          .limit(50)
+          .lean();
+        let n = 0;
+        for (const p of rows) {
+          const open = await Settlement.exists({ _id: p.settlementId, status: 'APPROVED' });
+          const retried = await Payout.exists({
+            settlementId: p.settlementId,
+            status: { $in: ['CREATED', 'PROCESSING', 'PAID'] },
+          });
+          if (open && !retried) n += 1;
+        }
+        return n;
+      })(),
+    ]);
+    add(
+      'payouts_need_attention',
+      unanswered + slow + failed,
+      () =>
+        `${unanswered} payout(s) not answered, ${slow} on their way for over a day, ${failed} failed and not retried. See GET /admin/payouts.`,
     );
 
     const errs = deps.errorWindow?.(5) ?? { requests: 0, serverErrors: 0 };

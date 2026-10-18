@@ -10,6 +10,14 @@ import { FareConfig } from '../pricing/fareConfig.model';
 import type { PricingService } from '../pricing/pricing.service';
 import { isWithinOperatingHours, type ZonesService } from '../zones/zones.service';
 import type { CouponsService } from '../coupons/coupons.service';
+import type { TripsService } from '../trips/trips.service';
+import {
+  calendarDays,
+  outstationEstimate,
+  rentalEstimate,
+  type OutstationSnapshot,
+  type RentalSnapshot,
+} from '../trips/tripFares';
 import { FareQuote } from './fareQuote.model';
 import { routeThrough } from './route';
 import type { CreateQuoteInput, ServiceabilityQuery } from './quotes.schemas';
@@ -34,7 +42,11 @@ type QuoteDoc = {
   usedAt?: Date | null;
   coupon?: { code: string } | null;
   discountPaise?: number | null;
+  scheduledFor?: Date | null;
   estimatedTotalPaise?: number;
+  tripKind?: string | null;
+  rental?: RentalSnapshot | null;
+  outstation?: (OutstationSnapshot & { returnAt?: Date | null }) | null;
 };
 
 export function quoteView(raw: unknown, now: Date) {
@@ -54,6 +66,20 @@ export function quoteView(raw: unknown, now: Date) {
     // What the rider would pay after their coupon (the real discount is set when the ride ends).
     coupon: q.coupon ? { code: q.coupon.code, discountPaise: q.discountPaise ?? 0 } : null,
     estimatedPayablePaise: (q.estimatedTotalPaise ?? 0) - (q.discountPaise ?? 0),
+    scheduledFor: q.scheduledFor ?? null,
+    tripKind: q.tripKind ?? 'CITY',
+    rental: q.rental ?? null,
+    outstation: q.outstation
+      ? {
+          tripType: q.outstation.tripType,
+          returnAt: q.outstation.returnAt ?? null,
+          days: q.outstation.days,
+          nights: q.outstation.nights,
+          routeMeters: q.outstation.routeMeters,
+          estimatedKm: q.outstation.estimatedKm,
+          perKmPaise: q.outstation.perKmPaise,
+        }
+      : null,
     configVersion: q.configVersion,
     expiresAt: q.expiresAt,
   };
@@ -65,17 +91,207 @@ export function createQuotesService(deps: {
   maps: MapsProvider;
   now: () => Date;
   coupons: Pick<CouponsService, 'evaluate'>;
+  trips: Pick<TripsService, 'rentalPackage' | 'outstationRate'>;
+  /** The longest round trip that can be booked, in days. */
+  outstationMaxDays: number;
+  /** Limits for rides booked for later. */
+  schedule: { minLeadMs: number; maxAheadMs: number };
 }) {
-  const { zones, pricing, maps, now, coupons } = deps;
+  const { zones, pricing, maps, now, coupons, schedule, trips } = deps;
+
+  /** A ride for later must be neither too soon nor too far ahead. */
+  function assertSchedulable(at: Date) {
+    const ahead = at.getTime() - now().getTime();
+    if (ahead < schedule.minLeadMs || ahead > schedule.maxAheadMs) {
+      const mins = Math.round(schedule.minLeadMs / 60_000);
+      const days = Math.round(schedule.maxAheadMs / 86_400_000);
+      throw new AppError('UNPROCESSABLE', undefined, [
+        {
+          field: 'scheduledFor',
+          message: `Choose a pickup time between ${mins} minutes and ${days} days from now`,
+        },
+      ]);
+    }
+  }
 
   /** Is this point inside an active zone that is open right now? */
-  async function checkPoint(lat: number, lng: number) {
+  async function checkPoint(lat: number, lng: number, at: Date = now()) {
     const zone = await zones.locate(lat, lng);
     if (!zone) return { serviceable: false as const, reason: 'OUTSIDE_SERVICE_AREA' as const };
-    if (!isWithinOperatingHours(zone.operatingHours, now())) {
+    if (!isWithinOperatingHours(zone.operatingHours, at)) {
       return { serviceable: false as const, reason: 'OUTSIDE_OPERATING_HOURS' as const };
     }
     return { serviceable: true as const, zone };
+  }
+
+  type Category = { _id: import('mongoose').Types.ObjectId };
+  const quoteWindow = () => new Date(now().getTime() + QUOTE_TTL_MS);
+
+  /** A rental: priced from the package; there is no route and no drop (the car comes back to the pickup). */
+  async function buildRental(
+    customerId: string,
+    input: CreateQuoteInput,
+    role: Role,
+    category: Category,
+  ) {
+    const rideAt = input.scheduledFor ?? now();
+    if (input.scheduledFor) assertSchedulable(input.scheduledFor);
+    const pickup = await checkPoint(input.pickup.lat, input.pickup.lng, rideAt);
+    if (!pickup.serviceable) {
+      throw new AppError('NOT_SERVICEABLE', `Pickup is not serviceable (${pickup.reason}).`);
+    }
+    const pkg = await trips.rentalPackage(input.rentalPackageId!);
+    if (
+      !pkg ||
+      !pkg.active ||
+      pkg.zoneId.toString() !== pickup.zone._id.toString() ||
+      pkg.categoryId.toString() !== category._id.toString()
+    ) {
+      throw new AppError('UNPROCESSABLE', undefined, [
+        {
+          field: 'rentalPackageId',
+          message: 'This package is not available here for this cab type.',
+        },
+      ]);
+    }
+    const snapshot: RentalSnapshot = {
+      packageId: pkg._id.toString(),
+      name: pkg.name,
+      hours: pkg.hours,
+      includedKm: pkg.includedKm,
+      pricePaise: pkg.pricePaise,
+      extraKmPaise: pkg.extraKmPaise,
+      extraHourPaise: pkg.extraHourPaise,
+    };
+    const fare = rentalEstimate(snapshot);
+    const applied = input.couponCode
+      ? await coupons.evaluate(role, {
+          code: input.couponCode,
+          userId: customerId,
+          zoneId: pickup.zone._id,
+          categoryId: category._id,
+          estimatedFarePaise: fare.breakdown.estimatedTotalPaise,
+        })
+      : null;
+    return FareQuote.create({
+      publicId: publicId('fq'),
+      customerId,
+      zoneId: pickup.zone._id,
+      categoryId: category._id,
+      tripKind: 'RENTAL',
+      rental: snapshot,
+      pickup: { label: input.pickup.label, location: toPoint(input.pickup.lat, input.pickup.lng) },
+      // The car returns to the pickup: the "drop" is the same place.
+      drop: {
+        label: input.pickup.label ?? 'Same as pickup (rental)',
+        location: toPoint(input.pickup.lat, input.pickup.lng),
+      },
+      stops: [],
+      distanceMeters: snapshot.includedKm * 1000,
+      durationSeconds: snapshot.hours * 3600,
+      breakdown: fare.breakdown,
+      estimatedTotalPaise: fare.breakdown.estimatedTotalPaise,
+      ...(applied ? { coupon: applied.snapshot, discountPaise: applied.discountPaise } : {}),
+      ...(input.scheduledFor ? { scheduledFor: input.scheduledFor } : {}),
+      expiresAt: quoteWindow(),
+    });
+  }
+
+  /** An outstation trip: priced from the route distance (and the days, for a round trip). */
+  async function buildOutstation(
+    customerId: string,
+    input: CreateQuoteInput,
+    role: Role,
+    category: Category,
+  ) {
+    const trip = input.outstation!;
+    const rideAt = input.scheduledFor ?? now();
+    if (input.scheduledFor) assertSchedulable(input.scheduledFor);
+    const pickup = await checkPoint(input.pickup.lat, input.pickup.lng, rideAt);
+    if (!pickup.serviceable) {
+      throw new AppError('NOT_SERVICEABLE', `Pickup is not serviceable (${pickup.reason}).`);
+    }
+    const rate = await trips.outstationRate(pickup.zone._id, category._id);
+    if (!rate) {
+      throw new AppError(
+        'NOT_SERVICEABLE',
+        'Outstation trips are not available from here for this cab type.',
+      );
+    }
+    const drop = input.drop!;
+    let route;
+    try {
+      route = await routeThrough(maps, [input.pickup, drop]);
+    } catch {
+      throw new AppError('PROVIDER_ERROR', 'Could not compute the route. Please try again.');
+    }
+    const routeKm = route.distanceMeters / 1000;
+    if (routeKm < rate.minKm) {
+      throw new AppError('UNPROCESSABLE', undefined, [
+        {
+          field: 'drop',
+          message: `Outstation trips are at least ${rate.minKm} km. For a shorter trip book a city ride.`,
+        },
+      ]);
+    }
+    if (routeKm > rate.maxKm) {
+      throw new AppError('NOT_SERVICEABLE', `Outstation trips are served up to ${rate.maxKm} km.`);
+    }
+    let days = 1;
+    if (trip.tripType === 'ROUND_TRIP') {
+      const returnAt = trip.returnAt!;
+      const hoursAway = (returnAt.getTime() - rideAt.getTime()) / 3_600_000;
+      if (hoursAway < 2 || hoursAway > deps.outstationMaxDays * 24) {
+        throw new AppError('UNPROCESSABLE', undefined, [
+          {
+            field: 'outstation',
+            message: `Choose a return time between 2 hours and ${deps.outstationMaxDays} days after pickup.`,
+          },
+        ]);
+      }
+      days = calendarDays(rideAt, returnAt);
+    }
+    const snapshot: OutstationSnapshot = {
+      rateId: rate._id.toString(),
+      tripType: trip.tripType,
+      routeMeters: route.distanceMeters,
+      returnAt: trip.returnAt ?? null,
+      days,
+      nights: days - 1,
+      perKmPaise: trip.tripType === 'ROUND_TRIP' ? rate.roundTripPerKmPaise : rate.oneWayPerKmPaise,
+      minKmPerDay: rate.minKmPerDay,
+      allowancePerNightPaise: rate.driverAllowancePerNightPaise,
+      minimumFarePaise: rate.minimumFarePaise,
+      estimatedKm: trip.tripType === 'ROUND_TRIP' ? routeKm * 2 : routeKm,
+    };
+    const fare = outstationEstimate(snapshot);
+    const applied = input.couponCode
+      ? await coupons.evaluate(role, {
+          code: input.couponCode,
+          userId: customerId,
+          zoneId: pickup.zone._id,
+          categoryId: category._id,
+          estimatedFarePaise: fare.breakdown.estimatedTotalPaise,
+        })
+      : null;
+    return FareQuote.create({
+      publicId: publicId('fq'),
+      customerId,
+      zoneId: pickup.zone._id,
+      categoryId: category._id,
+      tripKind: 'OUTSTATION',
+      outstation: snapshot,
+      pickup: { label: input.pickup.label, location: toPoint(input.pickup.lat, input.pickup.lng) },
+      drop: { label: drop.label, location: toPoint(drop.lat, drop.lng) },
+      stops: [],
+      distanceMeters: route.distanceMeters,
+      durationSeconds: route.durationSeconds,
+      breakdown: fare.breakdown,
+      estimatedTotalPaise: fare.breakdown.estimatedTotalPaise,
+      ...(applied ? { coupon: applied.snapshot, discountPaise: applied.discountPaise } : {}),
+      ...(input.scheduledFor ? { scheduledFor: input.scheduledFor } : {}),
+      expiresAt: quoteWindow(),
+    });
   }
 
   async function build(customerId: string, input: CreateQuoteInput, role: Role = 'CUSTOMER') {
@@ -85,11 +301,17 @@ export function createQuotesService(deps: {
         { field: 'categoryId', message: 'Unknown or inactive category' },
       ]);
     }
+    if (input.rentalPackageId) return buildRental(customerId, input, role, category);
+    if (input.outstation) return buildOutstation(customerId, input, role, category);
+    const dropInput = input.drop!;
     const stops = input.stops ?? [];
+    // The zone must be open at pickup time, which for a ride for later is not now.
+    if (input.scheduledFor) assertSchedulable(input.scheduledFor);
+    const rideAt = input.scheduledFor ?? now();
     const [pickup, drop, ...stopChecks] = await Promise.all([
-      checkPoint(input.pickup.lat, input.pickup.lng),
-      checkPoint(input.drop.lat, input.drop.lng),
-      ...stops.map((s) => checkPoint(s.lat, s.lng)),
+      checkPoint(input.pickup.lat, input.pickup.lng, rideAt),
+      checkPoint(dropInput.lat, dropInput.lng, rideAt),
+      ...stops.map((s) => checkPoint(s.lat, s.lng, rideAt)),
     ]);
     if (!pickup.serviceable) {
       throw new AppError('NOT_SERVICEABLE', `Pickup is not serviceable (${pickup.reason}).`);
@@ -108,14 +330,14 @@ export function createQuotesService(deps: {
 
     const at = now();
     // Pricing follows the pickup zone.
-    const config = await pricing.getActiveConfig(pickup.zone._id, category._id, at);
+    const config = await pricing.getActiveConfig(pickup.zone._id, category._id, rideAt);
     if (!config) {
       throw new AppError('NOT_SERVICEABLE', 'This category is not available in the pickup zone.');
     }
 
     let route;
     try {
-      route = await routeThrough(maps, [input.pickup, ...stops, input.drop]);
+      route = await routeThrough(maps, [input.pickup, ...stops, dropInput]);
     } catch {
       throw new AppError('PROVIDER_ERROR', 'Could not compute the route. Please try again.');
     }
@@ -157,13 +379,14 @@ export function createQuotesService(deps: {
       configId: config._id,
       configVersion: config.version,
       pickup: { label: input.pickup.label, location: toPoint(input.pickup.lat, input.pickup.lng) },
-      drop: { label: input.drop.label, location: toPoint(input.drop.lat, input.drop.lng) },
+      drop: { label: dropInput.label, location: toPoint(dropInput.lat, dropInput.lng) },
       stops: stops.map((s) => ({ label: s.label, location: toPoint(s.lat, s.lng) })),
       distanceMeters: route.distanceMeters,
       durationSeconds: route.durationSeconds,
       breakdown,
       estimatedTotalPaise: breakdown.estimatedTotalPaise,
       ...(applied ? { coupon: applied.snapshot, discountPaise: applied.discountPaise } : {}),
+      ...(input.scheduledFor ? { scheduledFor: input.scheduledFor } : {}),
       expiresAt: new Date(at.getTime() + QUOTE_TTL_MS),
     });
     return created;
@@ -178,6 +401,7 @@ export function createQuotesService(deps: {
 
   return {
     checkPoint,
+    assertSchedulable,
 
     async serviceability(query: ServiceabilityQuery) {
       const [pickup, drop] = await Promise.all([
@@ -232,16 +456,29 @@ export function createQuotesService(deps: {
           ...fromPoint(old.pickup.location!),
           ...(old.pickup.label ? { label: old.pickup.label } : {}),
         },
-        drop: {
-          ...fromPoint(old.drop.location!),
-          ...(old.drop.label ? { label: old.drop.label } : {}),
-        },
+        ...(old.tripKind === 'RENTAL'
+          ? { rentalPackageId: (old.rental as RentalSnapshot).packageId }
+          : {
+              drop: {
+                ...fromPoint(old.drop.location!),
+                ...(old.drop.label ? { label: old.drop.label } : {}),
+              },
+            }),
+        ...(old.tripKind === 'OUTSTATION'
+          ? {
+              outstation: {
+                tripType: old.outstation!.tripType,
+                ...(old.outstation!.returnAt ? { returnAt: old.outstation!.returnAt } : {}),
+              },
+            }
+          : {}),
         stops: (old.stops ?? []).map((s) => ({
           ...fromPoint(s.location!),
           ...(s.label ? { label: s.label } : {}),
         })),
         categoryId: old.categoryId.toString(),
         ...(old.coupon ? { couponCode: old.coupon.code } : {}),
+        ...(old.scheduledFor ? { scheduledFor: old.scheduledFor } : {}),
       });
       return quoteView(quote, now());
     },

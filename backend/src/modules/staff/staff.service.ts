@@ -7,6 +7,7 @@ import { normalizePhone } from '../../common/phone';
 import type { RealtimeBus } from '../../realtime/bus';
 import type { AuditService } from '../audit/audit.service';
 import { Session } from '../auth/session.model';
+import type { StaffAuthService } from '../staffauth/staffauth.service';
 import { User } from '../users/user.model';
 
 const staffRole = z.enum(STAFF_ROLES as [string, ...string[]]);
@@ -16,6 +17,8 @@ export const createStaffSchema = z
     phone: z.string().trim().min(8).max(20),
     name: z.string().trim().min(2).max(100),
     role: staffRole,
+    // Give them an email login (password + authenticator) straight away: they get a setup link.
+    email: z.string().trim().toLowerCase().pipe(z.email().max(160)).optional(),
   })
   .strict();
 
@@ -57,8 +60,9 @@ export function createStaffService(deps: {
   audit: AuditService;
   now: () => Date;
   bus?: Pick<RealtimeBus, 'disconnectUser'>;
+  credentials?: Pick<StaffAuthService, 'invite' | 'statusFor'>;
 }) {
-  const { audit, now, bus } = deps;
+  const { audit, now, bus, credentials } = deps;
 
   return {
     async list(query: StaffListQuery) {
@@ -72,7 +76,16 @@ export function createStaffService(deps: {
           .limit(query.limit)
           .lean(),
       ]);
-      return { items: rows.map(view), meta: pageMeta(query.page, query.limit, total) };
+      const logins = credentials
+        ? await credentials.statusFor(rows.map((r) => r._id.toString()))
+        : new Map<string, { email: string; mfaEnabled: boolean }>();
+      return {
+        items: rows.map((u) => ({
+          ...view(u),
+          login: logins.get(u._id.toString()) ?? null,
+        })),
+        meta: pageMeta(query.page, query.limit, total),
+      };
     },
 
     async create(actor: Actor, input: CreateStaffInput) {
@@ -95,6 +108,8 @@ export function createStaffService(deps: {
           targetId: created.id,
           metadata: { role: input.role },
         });
+        if (input.email && credentials)
+          await credentials.invite(actor, created.id, { email: input.email });
         return view(created.toObject());
       } catch (err) {
         if ((err as { code?: number }).code === 11000) {

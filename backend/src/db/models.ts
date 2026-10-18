@@ -19,6 +19,17 @@ import { Payment } from '../modules/payments/payment.model';
 import { Refund } from '../modules/payments/refund.model';
 import { WebhookEvent } from '../modules/payments/webhookEvent.model';
 import { Settlement } from '../modules/settlements/settlement.model';
+import {
+  Company,
+  Invoice,
+  InvoiceCounter,
+  Membership,
+} from '../modules/corporate/corporate.models';
+import { OutstationRate, RentalPackage } from '../modules/trips/trips.models';
+import { StaffCredential } from '../modules/staffauth/staffCredential.model';
+import { Payout, PayoutAccount } from '../modules/payouts/payout.model';
+import { Tip } from '../modules/tips/tip.model';
+import { Wallet } from '../modules/wallet/wallet.model';
 import { Coupon, CouponUsage } from '../modules/coupons/coupon.model';
 import { FeatureFlag } from '../modules/flags/featureFlag.model';
 import { Rating } from '../modules/ratings/rating.model';
@@ -71,4 +82,15 @@ export const allModels: Model<any>[] = [
   Rating,
   Coupon,
   CouponUsage,
+  Tip,
+  Wallet,
+  Payout,
+  PayoutAccount,
+  Company,
+  Membership,
+  Invoice,
+  InvoiceCounter,
+  StaffCredential,
+  RentalPackage,
+  OutstationRate,
 ];

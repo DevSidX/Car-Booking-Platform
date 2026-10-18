@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { Server as HttpServer } from 'node:http';
 import type { Logger } from 'pino';
 import { Server, type Socket } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import type { Redis } from 'ioredis';
 import { ZodError, z } from 'zod';
 import { AppError, type ErrorCode } from '../common/errors';
 import { OPS_ROOM_ROLES } from '../common/enums';
@@ -26,6 +28,8 @@ export type SocketServerOptions = {
   maxSocketsPerUser?: number;
   /** Connection attempts one network address may make per minute (before any login check). Default 120. */
   handshakesPerMinute?: number;
+  /** With several server instances, a Redis pair so a message reaches users connected to any of them. */
+  redisAdapter?: { pub: Redis; sub: Redis };
 };
 
 type Ack = (reply: unknown) => void;
@@ -100,6 +104,15 @@ export function createSocketBus() {
       // A GPS fix is tiny; refuse anything big.
       maxHttpBufferSize: 10_000,
     });
+    if (options.redisAdapter) {
+      // A Redis outage must not take the server down: local delivery keeps working.
+      for (const c of [options.redisAdapter.pub, options.redisAdapter.sub]) {
+        c.on('error', (err: Error) =>
+          options.logger.warn({ err: err.message }, 'socket redis error'),
+        );
+      }
+      server.adapter(createAdapter(options.redisAdapter.pub, options.redisAdapter.sub));
+    }
     io = server;
 
     /* ---- handshake: first, a cheap per-address limit, so floods never reach the database ---- */

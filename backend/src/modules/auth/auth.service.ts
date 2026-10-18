@@ -5,7 +5,7 @@ import type { Logger } from 'pino';
 import { AppError } from '../../common/errors';
 import { hmac, safeEqual } from '../../common/crypto';
 import { normalizePhone } from '../../common/phone';
-import type { SignupRole } from '../../common/enums';
+import { STAFF_ROLES, type SignupRole } from '../../common/enums';
 import type { Providers } from '../../providers';
 import { User } from '../users/user.model';
 import { CustomerProfile } from '../customers/customerProfile.model';
@@ -67,6 +67,7 @@ export function createAuthService(cfg: AuthConfig, providers: Providers, logger:
   async function createSession(
     userId: Types.ObjectId,
     device: Device | undefined,
+    refreshTtlMs: number = cfg.refreshTtlDays * 86_400_000,
   ): Promise<TokenPair> {
     const sessionId = new Types.ObjectId();
     const refreshToken = newRefreshToken(sessionId.toString());
@@ -75,7 +76,7 @@ export function createAuthService(cfg: AuthConfig, providers: Providers, logger:
       userId,
       refreshTokenHash: hash(refreshToken),
       device,
-      expiresAt: new Date(Date.now() + cfg.refreshTtlDays * 86_400_000),
+      expiresAt: new Date(Date.now() + refreshTtlMs),
       lastUsedAt: new Date(),
     });
     return {
@@ -86,6 +87,16 @@ export function createAuthService(cfg: AuthConfig, providers: Providers, logger:
   }
 
   return {
+    /** Start a login session for someone who has already proved who they are (staff, after their code). */
+    issueSession(userId: Types.ObjectId, role: string, device?: Device): Promise<TokenPair> {
+      const staff = (STAFF_ROLES as readonly string[]).includes(role);
+      return createSession(
+        userId,
+        device,
+        staff ? cfg.staffRefreshTtlHours * 3_600_000 : cfg.refreshTtlDays * 86_400_000,
+      );
+    },
+
     async requestOtp(input: { phone: string }) {
       const phone = normalizePhone(input.phone);
       if (!phone) {
@@ -178,6 +189,13 @@ export function createAuthService(cfg: AuthConfig, providers: Providers, logger:
         }
         if (user.accountStatus !== 'ACTIVE')
           throw new AppError('FORBIDDEN', 'Account is not active.');
+        // Staff hold powerful accounts: a phone code alone is not enough for them in production.
+        if (!cfg.staffOtpLogin && (STAFF_ROLES as readonly string[]).includes(user.role)) {
+          throw new AppError(
+            'FORBIDDEN',
+            'Staff sign in with email, password and an authenticator app.',
+          );
+        }
       } else {
         try {
           user = await User.create({

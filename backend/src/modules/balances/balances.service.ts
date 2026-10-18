@@ -11,6 +11,7 @@ import { User } from '../users/user.model';
 import { Accounts } from '../ledger/accounts';
 import type { FinanceConfig } from '../ledger/finance.config';
 import type { LedgerService } from '../ledger/ledger.service';
+import { Tip } from '../tips/tip.model';
 import { LedgerKinds, LedgerTransaction } from '../ledger/ledgerTransaction.model';
 import { amountDue, amountOwed } from '../payments/amountDue';
 import { Payment } from '../payments/payment.model';
@@ -168,6 +169,25 @@ export function createBalancesService(deps: {
           },
         ]),
       ]);
+      // Tips are the driver's in full, so they are shown beside (not inside) the commission figures.
+      const tipRows = await Tip.aggregate<{ total: number; count: number }>([
+        {
+          $match: {
+            driverId: profile._id,
+            status: 'PAID',
+            source: { $ne: 'CASH' },
+            ...(query.from || query.to
+              ? {
+                  paidAt: {
+                    ...(query.from ? { $gte: query.from } : {}),
+                    ...(query.to ? { $lte: query.to } : {}),
+                  },
+                }
+              : {}),
+          },
+        },
+        { $group: { _id: null, total: { $sum: '$amountPaise' }, count: { $sum: 1 } } },
+      ]);
       return {
         items: rows.map((b) => ({
           bookingId: b.publicId,
@@ -186,6 +206,8 @@ export function createBalancesService(deps: {
           chargedPaise: sums[0]?.amount ?? 0,
           commissionPaise: sums[0]?.commission ?? 0,
           earningsPaise: sums[0]?.earned ?? 0,
+          tipsPaise: tipRows[0]?.total ?? 0,
+          tipCount: tipRows[0]?.count ?? 0,
         },
         meta: pageMeta(query.page, query.limit, total),
       };
@@ -287,21 +309,38 @@ export function createBalancesService(deps: {
       ]);
       const [captured, refunded] = await Promise.all([
         Payment.aggregate<{ total: number }>([
-          { $match: { status: 'PAID', ledgerRecordedAt: { $exists: true } } },
+          // Wallet payments never touch the gateway, so they are not part of its balance.
+          {
+            $match: {
+              status: 'PAID',
+              method: { $ne: 'WALLET' },
+              ledgerRecordedAt: { $exists: true },
+            },
+          },
           { $group: { _id: null, total: { $sum: '$amountPaise' } } },
         ]),
         Refund.aggregate<{ total: number }>([
-          { $match: { status: 'PROCESSED' } },
+          // Refunds credited to a wallet stay with us; only refunds sent back leave the gateway.
+          { $match: { status: 'PROCESSED', destination: { $ne: 'WALLET' } } },
           { $group: { _id: null, total: { $sum: '$amountPaise' } } },
         ]),
       ]);
       const expectedGateway = (captured[0]?.total ?? 0) - (refunded[0]?.total ?? 0);
+      // A wallet is stored as a credit (negative). A positive total would mean more was spent than held.
+      const wallets = await LedgerTransaction.aggregate<{ _id: string; total: number }>([
+        { $unwind: '$entries' },
+        { $match: { 'entries.account': { $regex: '^WALLET:' } } },
+        { $group: { _id: '$entries.account', total: { $sum: '$entries.amountPaise' } } },
+        { $match: { total: { $gt: 0 } } },
+        { $limit: 20 },
+      ]);
       const gatewayPaise = onlineMismatches[Accounts.gateway]!;
       const ok =
         check.ledgerTotalPaise === 0 &&
         check.unbalancedTransactions.length === 0 &&
         check.completedRidesWithoutAccrual === 0 &&
         paymentsNotRecorded === 0 &&
+        wallets.length === 0 &&
         gatewayPaise === expectedGateway;
       return {
         ok,
@@ -311,6 +350,7 @@ export function createBalancesService(deps: {
         paymentsNotInLedger: paymentsNotRecorded,
         gatewayBalancePaise: gatewayPaise,
         expectedGatewayPaise: expectedGateway,
+        overdrawnWallets: wallets.map((w) => w._id),
       };
     },
 

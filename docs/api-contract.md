@@ -58,6 +58,9 @@ Integration notes for app developers: `docs/mobile-integration-guide.md`; live e
 | `UNAUTHENTICATED` | 401 |
 | `FORBIDDEN` | 403 |
 | `FEATURE_DISABLED` | 403 (the feature is switched off for this role: hide it in the app; see `GET /config/flags`) |
+| `INSUFFICIENT_WALLET_BALANCE` | 402 (the wallet does not hold enough: offer to add money or pay another way) |
+| `CORPORATE_NOT_ALLOWED` | 403 (not part of an active company account, or not a company admin) |
+| `CORPORATE_LIMIT_EXCEEDED` | 422 (a company limit; `fieldErrors[0].message` says which: per-ride cap, your monthly limit, or the company credit limit) |
 | `NOT_FOUND` | 404 (also used when a resource is not visible to the caller) |
 | `CONFLICT` | 409 |
 | `RIDE_ALREADY_ASSIGNED` | 409 |
@@ -113,3 +116,48 @@ Every endpoint declares its authorization (role + object ownership).
 - **Too-large bodies** (over 100 KB) return `400 VALIDATION_ERROR` "Request body too large."
 - **Sockets.** Too many connection attempts from one address are refused with `RATE_LIMITED` before any login check; reconnect with a growing delay.
 - **Operations health.** `GET /admin/system/health` (OPS, SUPER_ADMIN) returns `{ ok, checkedAt, checks[{ name, ok, count, detail }], jobs[] }`. `GET /admin/system/metrics` returns request counts and speed per route. `GET /metrics` (Prometheus text, shared token, 404 when not configured) is for a metrics tool, not an app.
+
+## Tips, wallet and payouts conventions
+- **Paying from the wallet** (`POST /bookings/{id}/pay-from-wallet`, `POST /rides/{id}/tip` with `source: WALLET`) is instant and needs an `Idempotency-Key`. `402 INSUFFICIENT_WALLET_BALANCE` leaves the booking payable; `409` means the wallet was busy with another payment, retry once.
+- **Top-up** (`POST /wallet/topups`) returns a normal payment with `checkout`; finish it with the Razorpay checkout and `/payments/verify` as for a ride. The balance changes only when the payment is confirmed (verify or webhook).
+- **Tips** are one per ride. A tip that was started online and never paid expires after 30 minutes and can be started again. The driver receives all of it.
+- **Refund to wallet** (`destination: WALLET` on the staff refund) credits the wallet immediately; `ORIGINAL` follows the old flow and completes by webhook.
+- **Payout webhooks.** `POST /webhooks/razorpayx` is called by the payout service (RazorpayX), signed over the raw body with its own secret. Set it in the RazorpayX dashboard for `payout.processed`, `payout.failed`, `payout.reversed`, `payout.rejected`.
+
+## Scheduled rides conventions
+- **Booking for later.** (1) `POST /fare-quotes` with `scheduledFor` (ISO time). The response echoes `scheduledFor`; the zone must be open at that time, otherwise `NOT_SERVICEABLE`; a time outside the allowed window is `422` with `fieldErrors[0].field = "scheduledFor"`. (2) `POST /bookings` with `rideType: "SCHEDULED"` and the **same** `scheduledFor`. A quote for later cannot book a ride now and the other way round: `QUOTE_MISMATCH`.
+- The booking is `SCHEDULED` and nobody is offered it yet. About 20 minutes before pickup it becomes `REQUESTED` and `DISPATCHING`, and the rider gets the usual `booking:status` events and a push. A driver's offer carries `scheduledFor`.
+- `PATCH /bookings/{id}/schedule` moves a waiting ride; after the search starts it is `409 RIDE_INVALID_STATE`.
+- Cancelling a `SCHEDULED` ride is free (`GET /bookings/{id}/cancel-preview` shows `feePaise: 0`).
+- Limit: 5 waiting rides per rider (`422`).
+
+## Analytics conventions
+- All under `/admin/analytics/...`, `OPS | FINANCE | SUPER_ADMIN` (revenue: `FINANCE | SUPER_ADMIN`). Period `from`/`to` (default last 28 days, at most 92), optional `zoneId`. Days and hours are in India time. Read-only; nothing here changes data.
+
+## Corporate accounts conventions
+- **Riding on the company account.** `POST /bookings` with `paymentMethod: "CORPORATE"` (and optionally `corporateReference`). The server checks membership and every limit before the quote is used up, so a refusal does not cost the rider the quote. The rider is never asked to pay: the booking's `paymentStatus` becomes `BILLED` and cash collection is refused.
+- **Company admin** is an ordinary rider login with an admin membership: `/corporate/...` endpoints (employees, rides, invoices). Everyone else gets `403 CORPORATE_NOT_ALLOWED`.
+- **Invoices** are produced by finance: generate a draft for a period (each ride is on one invoice only), issue it (gets its number and due date), record the company's bank payments (needs an `Idempotency-Key`), or void it. A company sees invoices only after they are issued.
+- Amounts are in paise. Tax is not calculated.
+
+## Staff login conventions
+- Staff are given a login by a super admin (`POST /admin/staff` with an `email`, or `POST /admin/staff/{userId}/credentials`). They get an emailed link (valid 3 days, single use). The admin panel opens it and calls: `POST /auth/staff/setup` (choose a password; the answer carries the authenticator secret / `otpauthUri` to show as a QR code) then `POST /auth/staff/setup/confirm` (first code; answer is a normal session plus 8 recovery codes to show ONCE).
+- Signing in: `POST /auth/staff/login` (email, password) answers `{ mfaRequired, mfaToken }`; `POST /auth/staff/mfa` (mfaToken + code or recoveryCode) answers the usual `accessToken` / `refreshToken`. Each authenticator code works once. Wrong details always give the same answer.
+- Forgotten password: `POST /auth/staff/password/forgot` (always 200), then `POST /auth/staff/password/reset` with the emailed token AND an authenticator/recovery code; all old logins end. A lost authenticator: a super admin re-invites the person (resets password and authenticator).
+- `429` with "Try again in N minute(s)" means the account is locked.
+
+## Privacy conventions
+- `GET /me/data-export` returns a JSON copy of the caller's data (once every 5 minutes, then `429`).
+- `POST /me/deletion` `{ confirm: true }` schedules deletion in 7 days; `GET /me/deletion` shows when and anything blocking (an unfinished ride, an unpaid amount, wallet money, a company-admin role, a driver settlement); `DELETE /me/deletion` cancels. If something comes up during the week the deletion is stopped and the person is told (push `privacy.deletion_blocked`).
+
+## File upload conventions
+- `POST /drivers/me/documents` returns `upload.url`: send the file with **HTTP PUT**, header `Content-Type` exactly as declared, max 10 MB, within 10 minutes. Then call `POST /drivers/me/documents/{id}/uploaded`; a bad file is refused (`422`, field `file`) and removed.
+
+## Rentals and outstation
+- `GET /rental-packages?lat&lng[&categoryId]` (rider): packages at that location.
+- `GET /outstation/options?lat&lng` (rider): cab types and per-km rates.
+- `POST /fare-quotes` now accepts either `rentalPackageId` (no `drop`, no `stops`) or `outstation: { tripType, returnAt? }` (with `drop`; `returnAt` required for `ROUND_TRIP`, not allowed for `ONE_WAY`). The response and the booking carry `tripKind`, `rental`, `outstation`. `POST /bookings` may echo `tripKind`; a mismatch gives `QUOTE_MISMATCH`.
+- A finished rental or outstation ride has `fare.measuredDistanceMeters`, `fare.labels`, `fare.details`; the receipt uses those labels and adds extra lines (for example `DRIVER_ALLOWANCE`).
+- Staff (config admin): `POST/GET/PATCH /admin/rental-packages`, `POST/GET/PATCH /admin/outstation-rates` (read also by OPS and FINANCE).
+- Driver: `GET/PATCH /drivers/me/preferences` with `{ acceptsRentals, acceptsOutstation }`.
+- Quote errors: `400` for a malformed request (rental with stops, round trip without `returnAt`); `422` for a rule failure (package not available here, trip shorter than the minimum).

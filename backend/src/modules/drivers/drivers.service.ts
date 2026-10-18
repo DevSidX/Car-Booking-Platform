@@ -20,6 +20,8 @@ import type {
 } from './drivers.schemas';
 
 const MAX_DOCUMENTS = 20;
+/** A scanned licence or RC photo is well under this; anything bigger is refused. */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 /** Resolve the caller's own driver profile. Always keyed by the authenticated user id. */
 export async function requireDriverProfile(userId: string) {
@@ -71,6 +73,30 @@ export function createDriversService(deps: {
 }) {
   const { storage, audit } = deps;
   const now = deps.now ?? (() => new Date());
+
+  /** Is the file there, a sensible size, and of the type that was declared? */
+  async function uploadProblem(
+    objectKey: string,
+    declaredType?: string | null,
+  ): Promise<{ message: string; delete: boolean } | null> {
+    const stat = await storage.statObject(objectKey);
+    if (!stat.exists) return { message: 'the file has not been uploaded yet.', delete: false };
+    if (stat.sizeBytes <= 0) return { message: 'the uploaded file is empty.', delete: true };
+    if (stat.sizeBytes > MAX_UPLOAD_BYTES) {
+      return {
+        message: `the file is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`,
+        delete: true,
+      };
+    }
+    if (
+      declaredType &&
+      stat.contentType &&
+      stat.contentType.split(';')[0]!.trim() !== declaredType
+    ) {
+      return { message: 'the file is not the type that was declared.', delete: true };
+    }
+    return null;
+  }
 
   return {
     /* ---------- Driver (self) ---------- */
@@ -135,9 +161,29 @@ export function createDriversService(deps: {
         objectKey,
         documentNumberLast4: input.documentNumberLast4,
         expiresAt: input.expiresAt,
+        contentType: input.contentType,
       });
       const upload = await storage.createUploadUrl(objectKey, input.contentType);
       return { document: docView(doc.toObject()), upload };
+    },
+
+    /**
+     * The app says the file is uploaded. We look in storage: it must be there, not too big, and of
+     * the declared type. A file that is not acceptable is deleted so it cannot be approved later.
+     */
+    async confirmUpload(userId: string, documentId: string) {
+      const profile = await requireDriverProfile(userId);
+      const doc = await DriverDocument.findOne({ _id: documentId, driverId: profile._id });
+      if (!doc) throw new AppError('NOT_FOUND', 'Document not found.');
+      const problem = await uploadProblem(doc.objectKey, doc.contentType);
+      if (problem) {
+        if (problem.delete) await storage.deleteObject(doc.objectKey).catch(() => undefined);
+        throw new AppError('UNPROCESSABLE', undefined, [
+          { field: 'file', message: problem.message },
+        ]);
+      }
+      await DriverDocument.updateOne({ _id: doc._id }, { uploadVerifiedAt: new Date() });
+      return docView((await DriverDocument.findById(doc._id))!.toObject());
     },
 
     async listDocuments(userId: string) {
@@ -301,6 +347,16 @@ export function createDriversService(deps: {
       documentId: string,
       input: DocumentReviewInput,
     ) {
+      if (input.status === 'APPROVED') {
+        // Never approve a file nobody can see: it must really be in storage, and acceptable.
+        const existing = await DriverDocument.findOne({ _id: documentId, driverId });
+        if (existing) {
+          const problem = await uploadProblem(existing.objectKey, existing.contentType);
+          if (problem) {
+            throw new AppError('CONFLICT', `This document cannot be approved: ${problem.message}`);
+          }
+        }
+      }
       const doc = await DriverDocument.findOneAndUpdate(
         { _id: documentId, driverId },
         {

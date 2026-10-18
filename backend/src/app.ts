@@ -6,6 +6,7 @@ import type { Logger } from 'pino';
 import { requestId } from './middleware/requestId';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { globalRateLimiter, userRateLimiter } from './middleware/rateLimit';
+import { limiterStore } from './middleware/limiterStore';
 import { healthRouter, type ReadinessCheck } from './modules/health/health.routes';
 import { openApiSpec } from './docs/openapi';
 import { createHash } from 'node:crypto';
@@ -33,9 +34,27 @@ import { createDocumentExpiryService } from './modules/drivers/documentExpiry.se
 import { createMonitorService, type MonitorConfig } from './modules/monitoring/monitor.service';
 import { monitorRouter } from './modules/monitoring/monitor.routes';
 import { createMetrics } from './modules/monitoring/metrics';
+import { createAnalyticsService } from './modules/analytics/analytics.service';
+import { analyticsRouter } from './modules/analytics/analytics.routes';
+import { createTipsService } from './modules/tips/tips.service';
+import { tipsRouter } from './modules/tips/tips.routes';
+import { walletRouter } from './modules/wallet/wallet.routes';
+import { createPayoutsService, type PayoutsService } from './modules/payouts/payouts.service';
+import { payoutsRouter } from './modules/payouts/payouts.routes';
+import { scheduledRouter } from './modules/bookings/scheduled.routes';
+import { createCorporateService } from './modules/corporate/corporate.service';
+import { corporateRouter } from './modules/corporate/corporate.routes';
+import { createTripsService } from './modules/trips/trips.service';
+import { tripsRouter } from './modules/trips/trips.routes';
+import { createScheduledService } from './modules/bookings/scheduled.service';
+import { createWalletService } from './modules/wallet/wallet.service';
 import { createLedgerService } from './modules/ledger/ledger.service';
 import { createFlagsService, type FlagDefaults } from './modules/flags/flags.service';
 import { flagsRouter } from './modules/flags/flags.routes';
+import { createPrivacyService } from './modules/privacy/privacy.service';
+import { privacyRouter } from './modules/privacy/privacy.routes';
+import { createStaffAuthService } from './modules/staffauth/staffauth.service';
+import { staffAuthRouter } from './modules/staffauth/staffauth.routes';
 import { createStaffService } from './modules/staff/staff.service';
 import { staffRouter } from './modules/staff/staff.routes';
 import { createCouponsService } from './modules/coupons/coupons.service';
@@ -109,6 +128,8 @@ export type AppDeps = {
   alertWebhookUrl?: string | undefined;
   /** Token a metrics tool uses for GET /metrics. Without it that endpoint is off. */
   metricsToken?: string | undefined;
+  /** Where the admin panel lives, for links in staff emails. */
+  staffPortalUrl?: string | undefined;
   environmentName?: string;
   monitorConfig?: Partial<MonitorConfig>;
 };
@@ -143,12 +164,27 @@ export function createApp(deps: AppDeps): Express {
   app.use(globalRateLimiter(deps.rateLimitMax));
   // Razorpay's webhook is signed over the EXACT bytes it sends, so it is read raw, before the JSON parser.
   let paymentsForWebhook: PaymentsService | null = null;
+  let payoutsForWebhook: PayoutsService | null = null;
   app.post(
     '/api/v1/webhooks/razorpay',
     express.raw({ type: () => true, limit: '200kb' }),
     async (req, res) => {
       if (!paymentsForWebhook) throw new AppError('SERVICE_UNAVAILABLE');
       const result = await paymentsForWebhook.handleWebhook(
+        Buffer.isBuffer(req.body) ? req.body : Buffer.from(''),
+        String(req.header('x-razorpay-signature') ?? ''),
+        req.header('x-razorpay-event-id') ?? undefined,
+      );
+      res.status(200).json({ success: true, data: { received: true, outcome: result.outcome } });
+    },
+  );
+  // The payout service (RazorpayX) signs its webhooks the same way, with its own secret.
+  app.post(
+    '/api/v1/webhooks/razorpayx',
+    express.raw({ type: () => true, limit: '200kb' }),
+    async (req, res) => {
+      if (!payoutsForWebhook) throw new AppError('SERVICE_UNAVAILABLE');
+      const result = await payoutsForWebhook.handleWebhook(
         Buffer.isBuffer(req.body) ? req.body : Buffer.from(''),
         String(req.header('x-razorpay-signature') ?? ''),
         req.header('x-razorpay-event-id') ?? undefined,
@@ -168,6 +204,7 @@ export function createApp(deps: AppDeps): Express {
   // (or the address when there is none); reads and the payment webhook are not counted.
   v1.use(
     rateLimit({
+      ...limiterStore('caller-writes'),
       windowMs: 60_000,
       limit: deps.callerWriteLimitPerMinute ?? 120,
       standardHeaders: true,
@@ -181,6 +218,7 @@ export function createApp(deps: AppDeps): Express {
   v1.use(
     '/fare-quotes',
     rateLimit({
+      ...limiterStore('coupon-guess'),
       windowMs: 5 * 60_000,
       limit: deps.couponGuessLimit ?? 15,
       standardHeaders: true,
@@ -201,19 +239,26 @@ export function createApp(deps: AppDeps): Express {
     now: deps.now ?? (() => new Date()),
   };
   const authLimiter = rateLimit({
+    ...limiterStore('auth'),
     windowMs: 15 * 60_000,
     limit: deps.authRateLimitMax ?? 30,
     standardHeaders: true,
     legacyHeaders: false,
     handler: (_req, _res, next) => next(new AppError('RATE_LIMITED')),
   });
-  v1.use(
-    authRouter(
-      createAuthService(deps.authConfig, deps.providers, deps.logger),
-      ctx.authenticate,
-      authLimiter,
-    ),
-  );
+  const authService = createAuthService(deps.authConfig, deps.providers, deps.logger);
+  v1.use(authRouter(authService, ctx.authenticate, authLimiter));
+  const staffAuth = createStaffAuthService({
+    hashSecret: deps.authConfig.hashSecret,
+    staffRefreshTtlHours: deps.authConfig.staffRefreshTtlHours,
+    portalUrl: deps.staffPortalUrl ?? 'http://localhost:3000',
+    auth: authService,
+    email: deps.providers.email,
+    audit: ctx.audit,
+    now: ctx.now,
+    logger: deps.logger,
+  });
+  v1.use(staffAuthRouter(ctx, staffAuth, authLimiter));
   v1.use(customersRouter(ctx));
   v1.use(categoriesRouter(ctx));
   v1.use(driversRouter(ctx));
@@ -232,6 +277,9 @@ export function createApp(deps: AppDeps): Express {
       SUPPORT_TICKETS: true,
       RATINGS: true,
       COUPONS: true,
+      TIPS: true,
+      WALLET: true,
+      CORPORATE: true,
       ...deps.featureDefaults,
     },
   });
@@ -241,14 +289,21 @@ export function createApp(deps: AppDeps): Express {
     now: ctx.now,
     logger: deps.logger,
   });
+  const dispatchConfig: DispatchConfig = { ...defaultDispatchConfig, ...deps.dispatchConfig };
+  const trips = createTripsService({ audit: ctx.audit, zones });
   const quotes = createQuotesService({
+    trips,
+    outstationMaxDays: dispatchConfig.outstationMaxDays,
     zones,
     pricing,
     maps: deps.providers.maps,
     now: ctx.now,
     coupons,
+    schedule: {
+      minLeadMs: dispatchConfig.scheduleMinLeadMs,
+      maxAheadMs: dispatchConfig.scheduleMaxAheadMs,
+    },
   });
-  const dispatchConfig: DispatchConfig = { ...defaultDispatchConfig, ...deps.dispatchConfig };
   const bus = deps.realtimeBus ?? nullBus;
   const notifications = createNotificationsService({
     push: deps.providers.push,
@@ -283,7 +338,9 @@ export function createApp(deps: AppDeps): Express {
     now: ctx.now,
     config: financeConfig,
   });
+  const wallet = createWalletService({ ledger, now: ctx.now, config: financeConfig });
   const payments = createPaymentsService({
+    wallet,
     provider: deps.providers.payments,
     ledger,
     audit: ctx.audit,
@@ -299,12 +356,24 @@ export function createApp(deps: AppDeps): Express {
     now: ctx.now,
     config: financeConfig,
   });
+  const payouts = createPayoutsService({
+    provider: deps.providers.payouts,
+    settlements,
+    notifications,
+    audit: ctx.audit,
+    now: ctx.now,
+    logger: deps.logger,
+    config: financeConfig,
+  });
+  payoutsForWebhook = payouts;
   const finance = {
     run: async () => {
       await payments.reconcile();
       await ledger.reconcile();
       await cash.reconcile();
       await settlements.reconcile();
+      await payouts.reconcile();
+      await corporate.reconcile();
     },
   };
   const presence = createPresenceService({
@@ -323,7 +392,19 @@ export function createApp(deps: AppDeps): Express {
     quotes,
     ledger,
   });
+  const corporate = createCorporateService({
+    ledger,
+    flags,
+    audit: ctx.audit,
+    notifications,
+    now: ctx.now,
+    logger: deps.logger,
+    reconcileGraceMs: financeConfig.reconcileGraceMs,
+    email: deps.providers.email,
+    finance: financeConfig,
+  });
   const bookings = createBookingsService({
+    corporate,
     quotes,
     policy: cancellationPolicy,
     commission,
@@ -332,6 +413,16 @@ export function createApp(deps: AppDeps): Express {
     dispatch,
     logger: deps.logger,
     now: ctx.now,
+    maxScheduledPerRider: dispatchConfig.maxScheduledPerRider,
+    scheduleOverlapMs: dispatchConfig.scheduleOverlapMs,
+  });
+  const scheduled = createScheduledService({
+    dispatch,
+    notifications,
+    audit: ctx.audit,
+    config: dispatchConfig,
+    now: ctx.now,
+    logger: deps.logger,
   });
   const documentExpiry = createDocumentExpiryService({
     notifications,
@@ -344,6 +435,7 @@ export function createApp(deps: AppDeps): Express {
   v1.use(cancellationPolicyRouter(ctx, cancellationPolicy));
   v1.use(quotesRouter(ctx, quotes, writeLimiter));
   v1.use(bookingsRouter(ctx, bookings, writeLimiter));
+  v1.use(scheduledRouter(ctx, scheduled));
   v1.use(presenceRouter(ctx, presence));
   v1.use(dispatchRouter(ctx, dispatch));
   v1.use(ridesRouter(ctx, rides));
@@ -361,6 +453,30 @@ export function createApp(deps: AppDeps): Express {
       devPayments: deps.devPayments === true,
     }),
   );
+  // Tips and the wallet (build on the payments above).
+  const tips = createTipsService({
+    payments,
+    flags,
+    notifications,
+    now: ctx.now,
+    config: financeConfig,
+    logger: deps.logger,
+  });
+  payments.setPaidHook(tips.onPaid);
+  v1.use(tipsRouter(ctx, tips));
+  v1.use(tripsRouter(ctx, trips));
+  const privacy = createPrivacyService({
+    ledger,
+    audit: ctx.audit,
+    notifications,
+    now: ctx.now,
+    logger: deps.logger,
+  });
+  v1.use(privacyRouter(ctx, privacy));
+  v1.use(corporateRouter(ctx, corporate));
+  v1.use(analyticsRouter(ctx, createAnalyticsService({ now: ctx.now })));
+  v1.use(payoutsRouter(ctx, payouts, { devPayments: deps.devPayments === true }));
+  v1.use(walletRouter(ctx, { wallet, payments, flags }));
   // Phase 7: safety, support, ratings, reports, staff, flags, coupons.
   const safety = createSafetyService({
     flags,
@@ -388,7 +504,7 @@ export function createApp(deps: AppDeps): Express {
     minRatingsShown: 5,
   });
   const reports = createReportsService({ audit: ctx.audit, now: ctx.now });
-  const staff = createStaffService({ audit: ctx.audit, now: ctx.now, bus });
+  const staff = createStaffService({ audit: ctx.audit, now: ctx.now, bus, credentials: staffAuth });
   v1.use(flagsRouter(ctx, flags));
   v1.use(staffRouter(ctx, staff));
   v1.use(couponsRouter(ctx, coupons));
@@ -400,6 +516,7 @@ export function createApp(deps: AppDeps): Express {
   const housekeeping = {
     run: async () => {
       await ratings.reconcile();
+      await privacy.run();
       await coupons.reconcile();
     },
   };
@@ -415,6 +532,12 @@ export function createApp(deps: AppDeps): Express {
   v1.use(monitorRouter(ctx, monitor, metrics, deps.metricsToken));
   // Background jobs (the dispatch sweeper) and tests reach services through here.
   app.locals['services'] = {
+    privacy,
+    corporate,
+    scheduled,
+    payouts,
+    tips,
+    wallet,
     metrics,
     monitor,
     flags,

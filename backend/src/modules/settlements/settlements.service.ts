@@ -11,6 +11,7 @@ import { Accounts } from '../ledger/accounts';
 import type { FinanceConfig } from '../ledger/finance.config';
 import type { LedgerService } from '../ledger/ledger.service';
 import { LedgerTransaction } from '../ledger/ledgerTransaction.model';
+import { Payout } from '../payouts/payout.model';
 import { Settlement, SettlementStatuses } from './settlement.model';
 
 const DUPLICATE_KEY = 11000;
@@ -250,6 +251,15 @@ export function createSettlementsService(deps: {
 
     /** The payout was sent outside the system (bank transfer): record it with its reference. */
     async markPaid(actor: Actor, settlementPublicId: string, input: MarkPaidInput) {
+      // A payout through the payout service is on its way or done: paying by hand too would pay twice.
+      if (
+        await Payout.exists({
+          settlementPublicId,
+          status: { $in: ['CREATED', 'PROCESSING', 'PAID'] },
+        })
+      ) {
+        throw new AppError('CONFLICT', 'A payout is already in progress for this settlement.');
+      }
       const paid = await Settlement.findOneAndUpdate(
         { publicId: settlementPublicId, status: 'APPROVED' },
         {
@@ -274,6 +284,42 @@ export function createSettlementsService(deps: {
         metadata: { payoutPaise: paid.payoutPaise, reference: input.payoutReference },
       });
       return view(paid as unknown as SettlementDoc);
+    },
+
+    /**
+     * The payout service confirmed the money was sent (called by the payouts service, never by a
+     * person). Safe to repeat. `reference` is the bank's reference number.
+     */
+    async completeByPayout(settlementPublicId: string, reference: string) {
+      const paid = await Settlement.findOneAndUpdate(
+        { publicId: settlementPublicId, status: 'APPROVED' },
+        { status: 'PAID', paidAt: now(), payoutReference: reference, open: false },
+        { returnDocument: 'after' },
+      );
+      const s =
+        paid ?? (await Settlement.findOne({ publicId: settlementPublicId, status: 'PAID' }));
+      if (s) await recordPayout(s as unknown as SettlementDoc);
+    },
+
+    /** The bank sent a paid payout back: owe the driver that money again, and flag it for finance. */
+    async reverseByPayout(settlementPublicId: string, payoutPublicId: string) {
+      const s = await Settlement.findOne({ publicId: settlementPublicId });
+      if (!s || s.payoutPaise <= 0) return;
+      await ledger.post({
+        kind: 'PAYOUT_REVERSAL',
+        idempotencyKey: `settle-pay-reverse:${payoutPublicId}`,
+        entries: [
+          { account: Accounts.driverPayable(s.driverId.toString()), amountPaise: -s.payoutPaise },
+          { account: Accounts.bank, amountPaise: s.payoutPaise },
+        ],
+        driverId: s.driverId,
+        description: `Settlement ${s.publicId}: payout sent back by the bank`,
+        at: now(),
+      });
+      await Settlement.updateOne(
+        { _id: s._id, payoutReversedAt: { $exists: false } },
+        { payoutReversedAt: now() },
+      );
     },
 
     async cancel(actor: Actor, settlementPublicId: string) {

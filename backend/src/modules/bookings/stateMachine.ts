@@ -7,6 +7,8 @@ import type { BookingStatus } from './booking.model';
  * a duplicate call, or two racing callers can never skip or repeat a step.
  */
 export const TRANSITIONS: Record<BookingStatus, readonly BookingStatus[]> = {
+  // Booked for later; the search starts shortly before pickup (REQUESTED) or the rider cancels.
+  SCHEDULED: ['REQUESTED', 'CANCELLED'],
   REQUESTED: ['DISPATCHING', 'CANCELLED'],
   DISPATCHING: ['DRIVER_ASSIGNED', 'NO_DRIVER_FOUND', 'CANCELLED'],
   // DISPATCHING again = the driver cancelled and the rider is given another driver.

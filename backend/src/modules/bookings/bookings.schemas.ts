@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { paginationSchema } from '../../common/pagination';
 import { objectId } from '../../common/zod';
+import { BookingStatuses } from './booking.model';
 
 const lat = z.number().min(-90).max(90);
 const lng = z.number().min(-180).max(180);
@@ -17,8 +19,12 @@ export const idempotencyKeySchema = z
 export const createBookingSchema = z
   .object({
     quoteId: z.string().min(1).max(40),
-    paymentMethod: z.enum(['CASH', 'ONLINE']),
-    rideType: z.literal('INSTANT').default('INSTANT'),
+    paymentMethod: z.enum(['CASH', 'ONLINE', 'CORPORATE']),
+    // For CORPORATE rides: the company's own reference (cost centre, project, purpose).
+    corporateReference: z.string().trim().min(1).max(60).optional(),
+    rideType: z.enum(['INSTANT', 'SCHEDULED']).default('INSTANT'),
+    // For rideType SCHEDULED: must match the time the quote was made for.
+    scheduledFor: z.coerce.date().optional(),
     notes: z.string().trim().max(300).optional(),
     pickup: z
       .object({
@@ -35,6 +41,8 @@ export const createBookingSchema = z
       .strict()
       .optional(),
     categoryId: objectId.optional(),
+    // Echoed for convenience; must match the quote.
+    tripKind: z.enum(['CITY', 'RENTAL', 'OUTSTATION']).optional(),
     // Echoed for convenience; must match the stops on the quote.
     stops: z
       .array(z.object({ lat, lng, label: z.string().max(200).optional() }).strict())
@@ -42,5 +50,12 @@ export const createBookingSchema = z
       .optional(),
   })
   .strict();
+
+export const bookingListQuerySchema = paginationSchema.extend({
+  status: z.enum(BookingStatuses).optional(),
+});
+export type BookingListQuery = z.infer<typeof bookingListQuerySchema>;
+
+export const rescheduleSchema = z.object({ scheduledFor: z.coerce.date() }).strict();
 
 export type CreateBookingInput = z.infer<typeof createBookingSchema>;

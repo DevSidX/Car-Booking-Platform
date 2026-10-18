@@ -11,6 +11,14 @@ export const LedgerKinds = [
   'REFUND',
   'WRITE_OFF',
   'FEE_WAIVER',
+  'WALLET_TOPUP',
+  'WALLET_PAYMENT',
+  'TIP_PAYMENT',
+  'PAYOUT_REVERSAL',
+  'CORPORATE_PAYMENT',
+  'CORPORATE_CREDIT',
+  'WALLET_BONUS',
+  'INVOICE_TAX',
 ] as const;
 export type LedgerKind = (typeof LedgerKinds)[number];
 

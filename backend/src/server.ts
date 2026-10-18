@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import http from 'node:http';
 import { loadEnv } from './config/env';
+import { useRedisForLimits } from './middleware/limiterStore';
 import { connectMongo, createRedis, disconnectMongo, pingMongo } from './config/db';
 import { createLogger } from './common/logger';
 import { createApp } from './app';
@@ -19,6 +20,8 @@ async function main(): Promise<void> {
 
   await connectMongo(env);
   const redis = createRedis(env);
+  if (redis) redis.on('error', (err) => logger.warn({ err: err.message }, 'redis error'));
+  useRedisForLimits(redis);
 
   let shuttingDown = false;
   const sockets = createSocketBus();
@@ -29,7 +32,19 @@ async function main(): Promise<void> {
         ? (phone, otp) => logger.info({ phone, devOtpCode: otp }, 'DEV OTP')
         : undefined,
   });
+  // Load-test mode: nothing is throttled, so the numbers show what the server itself can do.
+  const unlimited = env.LOAD_TEST_MODE
+    ? {
+        rateLimitMax: 10_000_000,
+        authRateLimitMax: 10_000_000,
+        bookingRateLimitMax: 10_000_000,
+        callerWriteLimitPerMinute: 10_000_000,
+        couponGuessLimit: 10_000_000,
+      }
+    : {};
+  if (env.LOAD_TEST_MODE) logger.warn('LOAD_TEST_MODE is on: rate limits are off');
   const app = createApp({
+    ...unlimited,
     logger,
     providers,
     authConfig: authConfigFromEnv(env),
@@ -40,6 +55,18 @@ async function main(): Promise<void> {
     tripLinkBase: env.TRIP_LINK_BASE?.replace(/\/$/, ''),
     alertWebhookUrl: env.ALERT_WEBHOOK_URL,
     metricsToken: env.METRICS_TOKEN,
+    staffPortalUrl: env.STAFF_PORTAL_URL,
+    financeConfig: {
+      autoPayouts: env.AUTO_PAYOUTS,
+      invoiceTaxBp: env.INVOICE_TAX_BP,
+      invoiceTaxLabel: env.INVOICE_TAX_LABEL,
+      seller: {
+        name: env.SELLER_NAME,
+        gstin: env.SELLER_GSTIN ?? null,
+        address: env.SELLER_ADDRESS ?? null,
+        sacCode: env.SELLER_SAC_CODE ?? null,
+      },
+    },
     environmentName: env.NODE_ENV,
     // "Pretend the rider paid" for app developers, only with mock payments and never in production.
     devPayments: env.NODE_ENV !== 'production' && env.PAYMENTS_DRIVER === 'mock',
@@ -58,6 +85,7 @@ async function main(): Promise<void> {
     documentExpiry: DocumentExpiryService;
     finance: { run: () => Promise<unknown> };
     safety: { escalate: () => Promise<unknown> };
+    scheduled: { run: () => Promise<unknown> };
     monitor: {
       run: () => Promise<unknown>;
       recordJob: (name: string, intervalMs: number, ok: boolean) => void;
@@ -75,6 +103,8 @@ async function main(): Promise<void> {
       // An SOS nobody has picked up is raised again to a super admin.
       { name: 'safety escalation', ms: 30_000, run: () => services.safety.escalate() },
       { name: 'housekeeping', ms: 60_000, run: () => services.housekeeping.run() },
+      // Rides booked for later: reminders, starting the search near pickup time, giving up on missed ones.
+      { name: 'scheduled rides', ms: 30_000, run: () => services.scheduled.run() },
       // Looks for trouble that needs a person (money, stuck searches, unanswered SOS, dead jobs).
       { name: 'monitor', ms: 60_000, run: () => services.monitor.run() },
     ],
@@ -92,6 +122,8 @@ async function main(): Promise<void> {
     logger,
     presence: services.presence,
     corsOrigins: env.CORS_ORIGINS,
+    ...(redis ? { redisAdapter: { pub: redis.duplicate(), sub: redis.duplicate() } } : {}),
+    ...(env.LOAD_TEST_MODE ? { handshakesPerMinute: 10_000_000 } : {}),
   });
   server.listen(env.PORT, () => logger.info({ port: env.PORT }, 'server listening'));
 

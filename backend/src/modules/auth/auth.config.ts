@@ -12,6 +12,10 @@ export type AuthConfig = {
   otpMaxPerHour: number;
   /** Non-production only: when set, every login OTP is this code (see STAGING_FIXED_OTP). */
   fixedOtp?: string;
+  /** May staff sign in with a phone code? Off in production: staff use email, password and an authenticator. */
+  staffOtpLogin: boolean;
+  /** Staff logins end sooner than everyone else's. */
+  staffRefreshTtlHours: number;
 };
 
 export function authConfigFromEnv(env: Env): AuthConfig {
@@ -25,5 +29,7 @@ export function authConfigFromEnv(env: Env): AuthConfig {
     otpMaxAttempts: env.OTP_MAX_ATTEMPTS,
     otpMaxPerHour: env.OTP_MAX_PER_HOUR,
     fixedOtp: env.STAGING_FIXED_OTP,
+    staffOtpLogin: env.STAFF_OTP_LOGIN,
+    staffRefreshTtlHours: env.STAFF_REFRESH_TTL_HOURS,
   };
 }

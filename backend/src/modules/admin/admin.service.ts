@@ -28,6 +28,7 @@ import type {
 } from './admin.schemas';
 
 const ACTIVE_BOOKING_STATUSES: BookingStatus[] = [
+  'SCHEDULED',
   'REQUESTED',
   'DISPATCHING',
   'DRIVER_ASSIGNED',

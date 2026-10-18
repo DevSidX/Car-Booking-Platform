@@ -1,6 +1,7 @@
 import { Schema, model } from 'mongoose';
 
 export const BookingStatuses = [
+  'SCHEDULED',
   'REQUESTED',
   'DISPATCHING',
   'DRIVER_ASSIGNED',
@@ -26,6 +27,8 @@ export const PaymentStatuses = [
   'REFUND_PENDING',
   'REFUNDED',
   'WRITTEN_OFF',
+  // Billed to the rider's company instead of the rider (corporate account).
+  'BILLED',
 ] as const;
 
 const placeSchema = new Schema(
@@ -93,8 +96,23 @@ const bookingSchema = new Schema(
     drop: { type: placeSchema, required: true },
     // Intermediate stops, in order (max 3), copied from the quote.
     stops: { type: [placeSchema], default: [] },
-    rideType: { type: String, enum: ['INSTANT'], default: 'INSTANT' },
-    paymentMethod: { type: String, enum: ['CASH', 'ONLINE'], required: true },
+    rideType: { type: String, enum: ['INSTANT', 'SCHEDULED'], default: 'INSTANT' },
+    // CITY (the usual ride), RENTAL (hourly package) or OUTSTATION (intercity). The package or rate is
+    // frozen here as it was when booked.
+    tripKind: { type: String, enum: ['CITY', 'RENTAL', 'OUTSTATION'], default: 'CITY' },
+    rental: { type: Schema.Types.Mixed },
+    outstation: { type: Schema.Types.Mixed },
+    // Scheduled rides: when the rider wants to be picked up, and whether the reminder went out.
+    scheduledFor: { type: Date },
+    scheduleReminderSentAt: { type: Date },
+    paymentMethod: { type: String, enum: ['CASH', 'ONLINE', 'CORPORATE'], required: true },
+    // Corporate rides: which company is billed, through which membership, the rider's cost-centre
+    // reference, the invoice it is on, and how much of it was credited back.
+    corporateId: { type: Schema.Types.ObjectId, ref: 'Company' },
+    corporateMembershipId: { type: Schema.Types.ObjectId, ref: 'Membership' },
+    corporateReference: { type: String, maxlength: 60 },
+    invoicedIn: { type: String },
+    corporateCreditedPaise: { type: Number, default: 0 },
     // Payment state is deliberately separate from booking/ride state.
     paymentStatus: { type: String, enum: PaymentStatuses, default: 'NOT_DUE' },
     status: { type: String, enum: BookingStatuses, default: 'REQUESTED', index: true },

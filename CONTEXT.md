@@ -181,7 +181,7 @@ Legend: [x] done and tested, [~] done but unverified in a real environment, [ ] 
 - [~] Real Firebase push: adapter already built; needs your service-account JSON in `FCM_SERVICE_ACCOUNT_JSON` and `PUSH_DRIVER=fcm`
 - [ ] Driver payout to bank, GST, tips, wallet (not in P7)
 
-### P8 Hardening & pilot: PART 1 DONE (no outside accounts needed); PART 2 waits for staging host, Redis, alert channel and backup setup
+### P8 Hardening & pilot: ALL DONE THAT NEEDS NO OUTSIDE ACCOUNT (528 tests); what remains needs the staging host, Redis, alert channel, backups and live provider checks
 - [x] Release gate: `npm run gate` runs 13 suites covering 11 named properties (`docs/release-gate.md`); 4 new composite gate tests (ride isolation, books balance, cancel leaves nothing stuck, location expiry)
 - [x] Security review with fixes: per-caller write limit (120/min), coupon-guess limit, socket connection-attempt limit, `no-store` on every API answer, HTTP timeouts, start-up refuses wildcard CORS and identical JWT secrets; verified already good: helmet, narrow CORS, 100 KB body cap, JWT algorithm pinned, refresh-token reuse detection, strict input schemas, no stack traces in errors, `npm audit` 0 vulnerabilities
 - [x] Security tests (12): headers, CORS, oversized/malformed/operator-injection input, forged/unsigned/expired/logged-out tokens, all three new limits, unsafe settings
@@ -189,15 +189,31 @@ Legend: [x] done and tested, [~] done but unverified in a real environment, [ ] 
 - [x] Metrics + error tracking without a third-party account: per-route counts/speed/status classes, 5xx window, memory and event-loop lag (`GET /admin/system/metrics`, Prometheus text at `GET /metrics` with `METRICS_TOKEN`); monitor check `error_rate` (8 checks now)
 - [x] Load-test scripts: `npm run loadtest` (riders) and `npm run loadtest:rides` (approved drivers created through the staff API, locations, offers, full rides to completion); both smoke-tested at tiny scale on the test server; fixed a bug found on the way (the first script reused one phone number for every simulated rider)
 - [x] Runbook (`docs/runbook.md`) and go/no-go checklist (`docs/release-gate.md`)
-- [ ] Run both load tests on a real staging host and record the limits (needs the host + a seeded staff account)
+- [x] Local load run done (`npm run loadtest:local`, results in `docs/load-test-results.md`): 0 server errors; it found and we fixed a real dispatch defect (riders from the same area all queued behind one driver: median wait 8 s -> 2 s, slowest 36 s -> 6 s, rides completed 3x)
+- [ ] Run both load tests on a real staging host and record the real limits (needs the host + a seeded staff account); try 200+ riders / 50+ drivers
 - [ ] Redis for several server instances (needs a Redis URL; one instance is fine for the pilot)
 - [ ] Alert channel: create a Slack/Discord webhook, set `ALERT_WEBHOOK_URL`, test by breaking a check on staging
 - [ ] Backups + one restore drill (needs a paid Atlas tier; the free M0 has no backups) - record the result in the runbook
 - [ ] Optional: Sentry-style error grouping (needs an account and key) and a dashboard on top of `GET /metrics` (e.g. Grafana); today: log + metrics endpoints + monitor alerts
 - [ ] Fill in the go/no-go checklist with real dates and names; fill in the runbook contacts
 
-### P9 Expansion: NOT STARTED
-- [ ] Scheduled, corporate, rentals, outstation, analytics
+### P8b Money extras: Tips, Wallet, Automatic driver payouts: DONE in code (payout service and wallet legality not verified live)
+- [x] Tips: one per ride, within 24 h, Rs 10-Rs 2,000, paid online or from the wallet, the driver gets 100% through the ledger (no commission), driver is told by push; shown in driver earnings (`tipsPaise`, `tipCount`); flag `TIPS`
+- [x] Wallet: closed wallet; top up through the normal Razorpay payment; pay a ride/fee/tip from the balance (instant, per-rider lock stops two spends using one balance, `402 INSUFFICIENT_WALLET_BALANCE`); refunds can go to the wallet (`destination: WALLET`; ride paid from the wallet can only go back to the wallet); staff view `/admin/wallets/{id}`; flag `WALLET`; consistency report now also catches an overdrawn wallet and ignores wallet payments/refunds in the gateway balance
+- [x] Automatic driver payouts: driver adds bank/UPI (full number goes only to the payout provider; we keep the last digits), finance verifies the account, an APPROVED settlement is paid out by finance (button) or automatically (`AUTO_PAYOUTS=true`), the provider webhook completes it; failure leaves it payable and retryable; unanswered payouts are re-sent with the same idempotency key (never twice); missed webhooks are caught by polling; a payout the bank sends back restores the driver's balance; monitor check `payouts_need_attention`; manual mark-paid is refused while a payout is live
+- [x] 36 new tests; 167 documented routes; found and fixed a bug (switching a payout account from bank to UPI kept the old IFSC)
+- [~] NOT verified live: RazorpayX (adapter only tested with a fake network; needs a RazorpayX account with a funded current account), real wallet top-up/refund-to-wallet through Razorpay
+- [ ] Legal/tax: confirm the wallet is allowed as designed (RBI prepaid-instrument rules), GST on tips/fares
+- [ ] Wallet withdrawal to bank, wallet promotions/cashback, tip suggestions in the app, tips for cash rides (not built)
+
+### P9 Expansion: analytics, scheduled rides, corporate, rentals and outstation all DONE in code (placeholders to confirm)
+- [x] Analytics (read-only, India time): demand heatmap by weekday and hour + zones, fulfilment by hour (completion, no-driver, time to find a driver), cancellations by who/why/how soon + fees, revenue by day (finance only; fares, discounts, commission, driver earnings, tips, refunds, how collected), driver ranking (rides, earnings, tips, acceptance, rating), retention (active riders/drivers, weekly new-rider groups and who came back); 6 endpoints, 9 tests
+- [x] Scheduled rides: quote/book for later (30 min to 7 days), new status `SCHEDULED`, zone hours checked at pickup time, 5 waiting per rider, reminder 1 h before, search starts 20 min before pickup (job every 30 s, safe on several instances), free cancel, reschedule, system cancel if missed by 30 min, driver offers show the pickup time, monitor check; 11 tests. Rules CONFIRMED by the owner (D97/D98/D101/D102): 30 min-7 days, search 20 min before, 10 min grace, 30 min gap, 5 waiting, fare locked; five-offer cap kept (D104, review after the pilot). Full suite: 554 tests passing
+- [x] Scheduled-rides review fixes: rider booking list `GET /bookings` (history, and `?status=SCHEDULED` soonest first), the search continues until pickup time + 10 min (it used to give up after 60 s), no two waiting rides within 30 min, staff can cancel a waiting ride for the rider or start its search early (audited); 23 scheduled-ride tests
+- [x] Corporate accounts: company with credit limit / terms / per-employee monthly limit / per-ride cap; admin and employees by phone invitation (one company each); `paymentMethod: CORPORATE` with every limit checked at booking; the company (not the rider) owes the fare through the ledger (`BILLED`, no cash, no online payment); finance generates, issues (gap-free numbers), takes bank payments for, and voids invoices; credits before invoicing; overdue monitor check; company admin sees employees, rides and invoices; 12 tests; full suite 566 passing; Atlas indexes run. All numbers are placeholders (D106); tax NOT calculated (D108)
+- [x] Rentals: staff-defined packages per zone and cab type; quote with `rentalPackageId`, no drop; billed on server clock and server GPS trail (10 min / 2 km grace); odometer is evidence only. Placeholders D119
+- [x] Outstation: per-km rates per zone and cab type; one way on quoted route unless 20% detour; round trip on max(real km, 250 km/day) plus night allowance; offered only to opted-in drivers; tolls/parking on actuals. Placeholders D120-D122
+- [ ] Analytics rollup table if volume grows; scheduled-ride fare re-check close to the time (decision)
 
 **Parallel product track (non-code, long lead time):** KYC/compliance review, staffed SOS response plan, finance/ledger/payout policy, Razorpay merchant approval, Google Maps + Firebase accounts, location retention policy.
 
@@ -445,6 +461,15 @@ Origin: a review of the P1-P3 database design found these gaps (see tracker for 
 
 **Not verified / left:** see the P8 tracker. The load script was only run at tiny scale against the in-memory test server; no real latency numbers exist yet. Alerts were tested with a fake webhook, not a real Slack/Discord one. Backups and restore are not set up.
 
+### Tips, wallet and payouts (done 2026-10-18)
+**Added:** tips (2 endpoints), wallet (4: wallet, top-up, pay from wallet, staff view), payouts (9: driver account x2, finance review/send/list x5, dev completion, provider webhook). Refund gained `destination`. Total 167 documented routes.
+
+**Design decisions:** D89-D95 in `docs/decisions.md`. Key idea: tips, top-ups and wallet payments are all `Payment` records (purpose + method), so refunds, reconciliation and duplicate-payment protection work for them too; the wallet balance is never stored, only derived from the ledger.
+
+**Operational:** `PAYOUTS_DRIVER`, `RAZORPAYX_*`, `AUTO_PAYOUTS` settings; webhook `/api/v1/webhooks/razorpayx`; `npm run indexes` for 4 new collections.
+
+**Not verified / left:** see the P8b tracker.
+
 ## 9. Repo layout (current)
 ```
 Car-Booking Platform/
@@ -476,10 +501,18 @@ Car-Booking Platform/
 - 2026-10-17: Phase 4 completed (312 tests, 71 documented routes; sockets, live tracking, push outbox; Redis and real Firebase deferred).
 - 2026-10-17: Phase 5 completed (385 tests, 82 documented routes; stops, waiting, destination change, cancellation fees/no-show, re-dispatch, receipts, document expiry).
 - 2026-10-17: Phase 6 completed (424 tests, 108 documented routes; ledger, Razorpay payments, cash, refunds, settlements).
+- 2026-10-18: Backend completion pass finished: staff login, email, privacy, upload checks, cash tips, wallet bonus, invoice tax, rentals, outstation, Redis support (optional, fail-open). New collections need `npm run indexes`.
+- 2026-10-18: Tips, wallet and automatic driver payouts built and tested (167 routes, 525 tests passing).
 - 2026-10-18: Phase 8 part 1 completed (500 tests passing; gate, security fixes, monitoring/alerts, load script, runbook, checklist).
 - 2026-10-17: Phase 7 backend completed (149 documented routes; flags, staff, SOS/trip share/emergency contacts, support, ratings, reports + CSV, coupons, RBAC matrix). 468 tests passing.
 
 ## 11. Next step
+All backend code is written. Next: confirm the placeholder numbers (D116, D117, D119-D122), create rental packages and outstation rates for the pilot zone, run `npm run indexes` on the real database, then the live checks (SMTP, S3/R2, RazorpayX, NimbusIT, Firebase, Razorpay, Redis with two instances), staging deploy, and the apps/admin panel. Deliberately not built: wallet withdrawal to a bank (legal risk) and an analytics rollup table (premature). Not built either: a live-meter endpoint for rentals, and the overrun monitor covers city rides only.
+
+(Previous note:)
+Tips, wallet and payouts are built. Before real money: RazorpayX account + one test payout, legal check on the wallet, `npm run indexes`. Then Phase 8 part 2 (staging, load test, alerts, backups) and the apps/admin panel.
+
+(Older note:)
 Phase 7 is complete on the backend (docs written, Atlas indexes run, tests green on Atlas). Show the Phase 8 plan. Nothing is committed (P0-P7): commit when the user asks.
 
 ## 12. Work left (detail, as of end of P7 backend)
@@ -536,3 +569,13 @@ Scheduled rides, corporate accounts, rentals, outstation, analytics. Plan it onl
 
 ### E. Suggested order for tomorrow
 1. Section A (finish P7). 2. Ask for the P8 plan and approve it. 3. While P8 is built, create the staging host, Firebase project and SMS/Maps keys from section D and put them in `backend/.env`. 4. Start the apps/admin panel track with the people who will build it.
+
+## 14. Backend completion pass (2026-10-18/19): what was added after Phase 9's first features
+- [x] **Staff login security:** email + password + authenticator (TOTP, recovery codes), lockout, 12-hour sessions, setup/reset emails, phone-code login refused for staff in production, first admin via `npm run seed` link (13 + 4 tests)
+- [x] **Email provider** (mock + SMTP via nodemailer 10.x, audit clean). NOT verified against a real mail server
+- [x] **Privacy:** data export, account deletion (7-day wait, blockers, anonymise, keep money records), staff-initiated deletion, job (9 tests). Retention periods still to decide (D112)
+- [x] **Document upload checks + S3/R2 storage adapter** (AWS SigV4 verified against the published AWS example; upload confirm endpoint; approval needs a real file) (7 tests). NOT verified against a real bucket
+- [x] **Cash tips, wallet top-up bonus, invoice tax (GST placeholder)**
+- [x] **Rentals and outstation** (quotes, bookings, dispatch preferences, final fare from the server trail, receipts, staff rate setup, 11 fare tests + 7 integration tests)
+- [x] **Redis support** (shared rate-limit counts and Socket.IO adapter behind `REDIS_URL`, fail-open; unit-tested only, not against a real Redis)
+- [x] **Monitor:** `rides_overrunning` check (city rides over 6 hours)

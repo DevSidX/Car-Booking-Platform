@@ -4,6 +4,19 @@ Written for the person on call. Health view: `GET /api/v1/admin/system/health` (
 
 ## Alerts and what to do
 
+### `corporate_invoices_overdue`
+A company invoice is past its due date and unpaid.
+1. `GET /admin/corporate-invoices?overdue=true` lists them. Contact the company's billing email (`GET /admin/corporate/{id}`).
+2. If they say they paid, find the transfer and record it: `POST /admin/corporate-invoices/{id}/payments` with the bank reference (use a new `Idempotency-Key` per payment).
+3. If they will not pay, stop new rides: `PATCH /admin/corporate/{id}` `{ "status": "SUSPENDED" }` (takes effect on the next booking). Rides already booked continue.
+4. Never void an invoice that has a payment on it; credit the rides before invoicing, or settle the difference with the company.
+
+### `scheduled_rides_overdue`
+A ride booked for later is past its pickup time and the search never started.
+1. Check the background jobs (`jobs_alive` in the same report). If the `scheduled rides` job is not running, restart the server.
+2. Look at the waiting rides: `GET /admin/bookings?status=SCHEDULED`. Start the search for one by hand with `POST /admin/bookings/{id}/scheduled/start-now` (OPS). If it is too late to help the rider, cancel it for them with `POST /admin/bookings/{id}/scheduled/cancel` (support or OPS, a reason is required; free for the rider).
+3. Rides more than 30 minutes late are cancelled by the system automatically and the rider is told. Make sure the rider is looked after (support ticket, a coupon).
+
 ### `sos_unacknowledged` (most urgent)
 An SOS has been OPEN for 5+ minutes, escalation did not get it picked up.
 1. Open `GET /admin/incidents?status=OPEN`, take it (`POST /admin/incidents/{id}/acknowledge`).
@@ -34,6 +47,23 @@ Bookings have been searching 10+ minutes (normally a search gives up in a few mi
 Push messages are waiting. Usually Firebase credentials or an outage.
 1. Check the log for "push" errors. Invalid credentials: fix `FCM_SERVICE_ACCOUNT_JSON` and restart.
 2. Firebase outage: it recovers by itself; the app also works without push (riders see status when they open the app).
+
+### `payouts_need_attention`
+A driver payout is stuck, slow or failed and nobody retried.
+1. `GET /admin/payouts?status=FAILED` (or `CREATED`, `PROCESSING`) shows the payout and its `failureReason` (for example "Account closed").
+2. FAILED: ask the driver to correct the payout account (the change is reviewed again), then `POST /admin/settlements/{id}/payout` to try again. The settlement stays payable meanwhile; no money is lost.
+3. CREATED for a long time: the payout service did not answer. The repair job retries by itself; if it keeps failing, check the RazorpayX status page and balance (a payout needs funds in the RazorpayX account).
+4. PROCESSING over a day: ask RazorpayX support with the payout id (`providerPayoutId` in the database); do NOT pay by hand until it is FAILED or REVERSED.
+5. REVERSED after PAID: the bank sent the money back; the driver's balance is restored automatically. Contact the driver for a correct account, then send a new settlement.
+
+### A staff member is locked out, lost their phone, or forgot the password
+- Locked (too many wrong tries): wait 15 minutes. Nothing to do; it clears itself.
+- Forgot the password: they use "Forgot password" (needs their authenticator code).
+- Lost phone / authenticator, or both: a super admin gives them a fresh setup link: `POST /admin/staff/{userId}/credentials` `{ "email": ... }`. This ends their old logins and resets the password and authenticator. Check it is really them first (call back on a known number).
+- The ONLY super admin is locked out: on the server run `SEED_ADMIN_PHONE=... SEED_ADMIN_EMAIL=... npm run seed` and use the printed setup link.
+
+### A deletion or export request
+- People delete or export from the app. A legal request by email: a super admin runs `POST /admin/users/{id}/delete` with a reason (refused while money or a ride is unresolved; sort that out first). Keep the request email.
 
 ### `error_rate`
 At least 5 server errors (5xx) in the last 5 minutes and 5% or more of all requests.
@@ -66,3 +96,9 @@ A background job stopped succeeding (named in the alert).
 
 ## Contacts (fill in)
 Safety desk phone: ______  Finance: ______  Developer on call: ______  Razorpay support: ______  Atlas support: ______
+
+## A ride is flagged as overrunning
+`GET /admin/system/health` shows `rides_overrunning`: a city ride has been in progress for over 6 hours (rentals and outstation are not counted). Call the driver; if the ride is really over, support can complete or cancel it. Check whether the driver app stopped sending location.
+
+## Rental or outstation fare dispute
+Receipt lines come from the stored final fare. The distance is `fare.measuredDistanceMeters` (server GPS trail) and the time is the server clock. A booking event `ODOMETER_MISMATCH` means the driver odometer readings disagreed with the trail by a lot; look at the trail before changing any amount. Corrections go through the normal credit and adjustment process.

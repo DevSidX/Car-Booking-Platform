@@ -116,6 +116,8 @@ describe('what a completed ride puts in the ledger', () => {
       chargedPaise: fare,
       commissionPaise: commission,
       earningsPaise: fare - commission,
+      tipsPaise: 0,
+      tipCount: 0,
     });
     expect(earn.items[0]).toMatchObject({
       bookingId: booking.bookingId,

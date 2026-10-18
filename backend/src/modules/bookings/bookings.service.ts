@@ -5,6 +5,7 @@ import { fromPoint } from '../../common/geo';
 import { publicId } from '../../common/ids';
 import { normalizePhone } from '../../common/phone';
 import type { Logger } from 'pino';
+import { pageMeta } from '../../common/pagination';
 import type { DispatchService } from '../dispatch/dispatch.service';
 import type { CouponsService } from '../coupons/coupons.service';
 import { amountDue } from '../payments/amountDue';
@@ -16,7 +17,8 @@ import { Ride } from '../rides/ride.model';
 import { driverCard } from '../rides/rides.views';
 import { Booking } from './booking.model';
 import { BookingEvent } from './bookingEvent.model';
-import type { CreateBookingInput } from './bookings.schemas';
+import type { CorporateService } from '../corporate/corporate.service';
+import type { BookingListQuery, CreateBookingInput } from './bookings.schemas';
 
 /** Roles that may read any customer's booking. Drivers get access once assigned (Phase 3). */
 export const BOOKING_ADMIN_ROLES = ['OPS', 'SUPPORT', 'SUPER_ADMIN'] as const;
@@ -35,6 +37,9 @@ type BookingLean = {
   paymentStatus?: string | null;
   paymentMethod: string;
   rideType?: string | null;
+  scheduledFor?: Date | null;
+  corporateId?: unknown;
+  corporateReference?: string | null;
   estimatedFarePaise: number;
   fareSnapshot: unknown;
   pickup: {
@@ -45,6 +50,9 @@ type BookingLean = {
   };
   drop: { label?: string | null; location: { coordinates: number[] } };
   stops?: { label?: string | null; location: { coordinates: number[] } }[];
+  tripKind?: string | null;
+  rental?: unknown;
+  outstation?: unknown;
   fee?: { type: string; amountPaise: number; status: string } | null;
   receipt?: { number?: string | null } | null;
   coupon?: { code: string; estimatedDiscountPaise?: number | null } | null;
@@ -62,6 +70,9 @@ export function bookingView(raw: unknown) {
     paymentStatus: b.paymentStatus ?? 'NOT_DUE',
     paymentMethod: b.paymentMethod,
     rideType: b.rideType ?? 'INSTANT',
+    scheduledFor: b.scheduledFor ?? null,
+    billedToCompany: Boolean(b.corporateId),
+    corporateReference: b.corporateReference ?? null,
     quoteId: b.quoteId,
     categoryId: b.categoryId.toString(),
     estimatedFarePaise: b.estimatedFarePaise,
@@ -74,6 +85,9 @@ export function bookingView(raw: unknown) {
     },
     drop: { ...fromPoint(b.drop.location), label: b.drop.label ?? null },
     stops: (b.stops ?? []).map((s) => ({ ...fromPoint(s.location), label: s.label ?? null })),
+    tripKind: b.tripKind ?? 'CITY',
+    rental: b.rental ?? null,
+    outstation: b.outstation ?? null,
     fare: b.fareSnapshot,
     notes: b.notes ?? null,
     createdAt: b.requestedAt,
@@ -107,11 +121,37 @@ export function createBookingsService(deps: {
   commission: Pick<CommissionService, 'activeSnapshot'>;
   balances: Pick<BalancesService, 'assertCanBook'>;
   coupons: Pick<CouponsService, 'reserve' | 'release'>;
+  corporate: Pick<CorporateService, 'authorizeBooking'>;
   dispatch: DispatchService;
   logger: Logger;
   now: () => Date;
+  /** How many rides for later one rider may have waiting. */
+  maxScheduledPerRider: number;
+  /** One rider's scheduled rides must be at least this far apart. */
+  scheduleOverlapMs: number;
 }) {
   const { quotes, policy, commission, balances, coupons, dispatch, logger, now } = deps;
+
+  /** A rider cannot be in two places at once: scheduled rides need some distance in time. */
+  async function assertNoOverlap(customerId: string, at: Date, exceptId?: string) {
+    const clash = await Booking.exists({
+      customerId,
+      status: 'SCHEDULED',
+      ...(exceptId ? { _id: { $ne: exceptId } } : {}),
+      scheduledFor: {
+        $gt: new Date(at.getTime() - deps.scheduleOverlapMs),
+        $lt: new Date(at.getTime() + deps.scheduleOverlapMs),
+      },
+    });
+    if (clash) {
+      throw new AppError('UNPROCESSABLE', undefined, [
+        {
+          field: 'scheduledFor',
+          message: `You already have a scheduled ride within ${Math.round(deps.scheduleOverlapMs / 60_000)} minutes of this time`,
+        },
+      ]);
+    }
+  }
 
   async function visibleBooking(actor: Actor, bookingId: string) {
     const isAdmin = (BOOKING_ADMIN_ROLES as readonly string[]).includes(actor.role);
@@ -147,6 +187,8 @@ export function createBookingsService(deps: {
             quoteId: input.quoteId,
             paymentMethod: input.paymentMethod,
             rideType: input.rideType,
+            scheduledFor: input.scheduledFor?.toISOString() ?? null,
+            corporateReference: input.corporateReference ?? null,
             notes: input.notes ?? null,
             contactName: input.pickup?.contactName ?? null,
             contactPhone: contactPhone ?? null,
@@ -171,9 +213,54 @@ export function createBookingsService(deps: {
       if (
         (input.pickup && (!near(input.pickup.lng, qp[0]!) || !near(input.pickup.lat, qp[1]!))) ||
         (input.drop && (!near(input.drop.lng, qd[0]!) || !near(input.drop.lat, qd[1]!))) ||
-        (input.categoryId && input.categoryId !== quote.categoryId.toString())
+        (input.categoryId && input.categoryId !== quote.categoryId.toString()) ||
+        (input.tripKind && input.tripKind !== (quote.tripKind ?? 'CITY'))
       ) {
         throw new AppError('QUOTE_MISMATCH');
+      }
+
+      // A ride for later is priced for its pickup time, so the quote and the booking must agree on
+      // whether it is for later and for when. (A quote is the source of truth.)
+      const wantsLater = input.rideType === 'SCHEDULED';
+      if (
+        wantsLater !== Boolean(quote.scheduledFor) ||
+        (wantsLater &&
+          (!input.scheduledFor || input.scheduledFor.getTime() !== quote.scheduledFor!.getTime()))
+      ) {
+        throw new AppError('QUOTE_MISMATCH');
+      }
+      if (wantsLater) {
+        quotes.assertSchedulable(quote.scheduledFor!);
+        await assertNoOverlap(customerId, quote.scheduledFor!);
+        const waiting = await Booking.countDocuments({ customerId, status: 'SCHEDULED' });
+        if (waiting >= deps.maxScheduledPerRider) {
+          throw new AppError(
+            'UNPROCESSABLE',
+            `You can have at most ${deps.maxScheduledPerRider} scheduled rides at a time.`,
+          );
+        }
+      }
+
+      // A ride on the company's account: the rider must be a member and inside every limit. This
+      // is checked before the quote is used up, so a refusal does not cost the rider their quote.
+      let corporate: {
+        companyId: import('mongoose').Types.ObjectId;
+        membershipId: import('mongoose').Types.ObjectId;
+      } | null = null;
+      if (input.paymentMethod === 'CORPORATE') {
+        if (quote.coupon) {
+          throw new AppError('UNPROCESSABLE', undefined, [
+            {
+              field: 'paymentMethod',
+              message: 'Coupons cannot be used on a company-account ride.',
+            },
+          ]);
+        }
+        corporate = await deps.corporate.authorizeBooking(customerId, quote.estimatedTotalPaise);
+      } else if (input.corporateReference) {
+        throw new AppError('UNPROCESSABLE', undefined, [
+          { field: 'corporateReference', message: 'Only for rides on a company account.' },
+        ]);
       }
 
       const quoteStops = quote.stops ?? [];
@@ -233,6 +320,9 @@ export function createBookingsService(deps: {
           },
           drop: { label: input.drop?.label ?? quote.drop.label, location: quote.drop.location },
           stops: quoteStops.map((s) => ({ label: s.label, location: s.location })),
+          tripKind: quote.tripKind ?? 'CITY',
+          ...(quote.rental ? { rental: quote.rental } : {}),
+          ...(quote.outstation ? { outstation: quote.outstation } : {}),
           policy: policySnapshot,
           ...(quote.coupon
             ? {
@@ -249,13 +339,23 @@ export function createBookingsService(deps: {
             : {}),
           commission: await commission.activeSnapshot(quote.zoneId, at),
           rideType: input.rideType,
+          ...(wantsLater ? { scheduledFor: quote.scheduledFor } : {}),
           paymentMethod: input.paymentMethod,
-          status: 'REQUESTED',
+          ...(corporate
+            ? {
+                corporateId: corporate.companyId,
+                corporateMembershipId: corporate.membershipId,
+                ...(input.corporateReference
+                  ? { corporateReference: input.corporateReference }
+                  : {}),
+              }
+            : {}),
+          status: wantsLater ? 'SCHEDULED' : 'REQUESTED',
           paymentStatus: 'NOT_DUE',
           estimatedFarePaise: quote.estimatedTotalPaise,
           fareSnapshot: {
             currency: quote.currency,
-            configId: quote.configId.toString(),
+            configId: quote.configId?.toString() ?? null,
             configVersion: quote.configVersion,
             estimatedDistanceMeters: quote.distanceMeters,
             estimatedDurationSeconds: quote.durationSeconds,
@@ -269,17 +369,20 @@ export function createBookingsService(deps: {
         await BookingEvent.create({
           bookingId: booking._id,
           type: 'BOOKING_CREATED',
-          toStatus: 'REQUESTED',
+          toStatus: wantsLater ? 'SCHEDULED' : 'REQUESTED',
           actorType: 'CUSTOMER',
           actorId: customerId,
           at,
         });
         // Hand the booking to dispatch. A failure here must not lose the booking: the sweeper
         // picks up any REQUESTED booking that never started.
-        try {
-          await dispatch.start(booking.publicId);
-        } catch (err) {
-          logger.error({ err, bookingId: booking.publicId }, 'dispatch start failed');
+        // (A ride for later waits; the scheduled-rides job starts its search near pickup time.)
+        if (!wantsLater) {
+          try {
+            await dispatch.start(booking.publicId);
+          } catch (err) {
+            logger.error({ err, bookingId: booking.publicId }, 'dispatch start failed');
+          }
         }
         const fresh = await Booking.findById(booking._id);
         return { booking: bookingView((fresh ?? booking).toObject()), replayed: false };
@@ -293,6 +396,65 @@ export function createBookingsService(deps: {
         await quotes.release(quote.publicId);
         throw err;
       }
+    },
+
+    /** Move a ride that is still waiting (SCHEDULED) to another pickup time. */
+    async reschedule(customerId: string, bookingId: string, scheduledFor: Date) {
+      const booking = await Booking.findOne({ publicId: bookingId, customerId });
+      if (!booking) throw new AppError('NOT_FOUND', 'Booking not found.');
+      if (booking.status !== 'SCHEDULED') {
+        throw new AppError('RIDE_INVALID_STATE', 'Only a scheduled ride can be moved.');
+      }
+      quotes.assertSchedulable(scheduledFor);
+      await assertNoOverlap(customerId, scheduledFor, booking._id.toString());
+      // The zone must be open at the new time, at both ends.
+      const [lng, lat] = booking.pickup.location!.coordinates as [number, number];
+      const [dLng, dLat] = booking.drop.location!.coordinates as [number, number];
+      for (const [la, ln] of [
+        [lat, lng],
+        [dLat, dLng],
+      ] as const) {
+        const check = await quotes.checkPoint(la, ln, scheduledFor);
+        if (!check.serviceable) {
+          throw new AppError('NOT_SERVICEABLE', `Not serviceable at that time (${check.reason}).`);
+        }
+      }
+      const from = booking.scheduledFor;
+      const moved = await Booking.findOneAndUpdate(
+        { _id: booking._id, status: 'SCHEDULED' },
+        { scheduledFor, $unset: { scheduleReminderSentAt: 1 } },
+        { returnDocument: 'after' },
+      );
+      if (!moved) {
+        throw new AppError('RIDE_INVALID_STATE', 'This ride has already started being arranged.');
+      }
+      await BookingEvent.create({
+        bookingId: booking._id,
+        type: 'RESCHEDULED',
+        actorType: 'CUSTOMER',
+        actorId: customerId,
+        at: now(),
+        metadata: { from, to: scheduledFor },
+      });
+      return bookingView(moved.toObject());
+    },
+
+    /** The rider's own bookings. Waiting scheduled rides come soonest-first; everything else newest-first. */
+    async list(customerId: string, query: BookingListQuery) {
+      const filter = { customerId, ...(query.status ? { status: query.status } : {}) };
+      const upcoming = query.status === 'SCHEDULED';
+      const [total, rows] = await Promise.all([
+        Booking.countDocuments(filter),
+        Booking.find(filter)
+          .sort(upcoming ? { scheduledFor: 1 } : { requestedAt: -1 })
+          .skip((query.page - 1) * query.limit)
+          .limit(query.limit)
+          .lean(),
+      ]);
+      return {
+        items: rows.map((b) => bookingView(b)),
+        meta: pageMeta(query.page, query.limit, total),
+      };
     },
 
     async get(actor: Actor, bookingId: string) {

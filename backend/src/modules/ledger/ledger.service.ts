@@ -119,6 +119,12 @@ export function createLedgerService(deps: {
     return (await balances([account]))[account]!;
   }
 
+  /** Who owes the money for a booking: the rider, or the company it is billed to. */
+  const receivableOf = (b: { customerId: Types.ObjectId; corporateId?: Types.ObjectId | null }) =>
+    b.corporateId
+      ? Accounts.corporateReceivable(b.corporateId.toString())
+      : Accounts.riderReceivable(b.customerId.toString());
+
   /* ---------------- accruals: a ride or a fee becomes money owed ---------------- */
 
   async function markAccrued(
@@ -157,7 +163,7 @@ export function createLedgerService(deps: {
       b.commission?.rateBp ?? config.defaultCommissionBp,
     );
     const entries: LedgerEntry[] = [
-      { account: Accounts.riderReceivable(b.customerId.toString()), amountPaise: b.finalFarePaise },
+      { account: receivableOf(b), amountPaise: b.finalFarePaise },
       {
         account: Accounts.driverPayable(b.assignedDriverId.toString()),
         amountPaise: -driverSharePaise,
@@ -199,10 +205,7 @@ export function createLedgerService(deps: {
       b.commission?.rateBp ?? config.defaultCommissionBp,
     );
     const entries: LedgerEntry[] = [
-      {
-        account: Accounts.riderReceivable(b.customerId.toString()),
-        amountPaise: b.fee.amountPaise,
-      },
+      { account: receivableOf(b), amountPaise: b.fee.amountPaise },
       ...(driverSharePaise > 0
         ? [
             {
@@ -247,10 +250,7 @@ export function createLedgerService(deps: {
       kind: 'FEE_WAIVER',
       idempotencyKey: `waive-fee:${b.publicId}`,
       entries: [
-        {
-          account: Accounts.riderReceivable(b.customerId.toString()),
-          amountPaise: -b.fee.amountPaise,
-        },
+        { account: receivableOf(b), amountPaise: -b.fee.amountPaise },
         { account: Accounts.waivedFees, amountPaise: b.fee.amountPaise },
       ],
       bookingId: b._id,

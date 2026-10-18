@@ -30,6 +30,60 @@ const schema = z.object({
   // mock = log only; fcm = real Firebase push (needs FCM_SERVICE_ACCOUNT_JSON).
   PUSH_DRIVER: z.enum(['mock', 'fcm']).default('mock'),
   FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
+  // May staff sign in with a phone code like riders? Defaults to yes outside production and is
+  // refused in production, where staff must use email + password + an authenticator.
+  STAFF_OTP_LOGIN: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true')),
+  STAFF_REFRESH_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(12),
+  // Where the admin panel lives, for the links in staff emails.
+  STAFF_PORTAL_URL: z.string().url().default('http://localhost:3000'),
+  // Tax on company invoices, in basis points (1800 = 18%). 0 = none. Decide with an accountant.
+  INVOICE_TAX_BP: z.coerce.number().int().min(0).max(5000).default(0),
+  INVOICE_TAX_LABEL: z.string().default('GST'),
+  SELLER_NAME: z.string().default('Cab Booking Platform'),
+  SELLER_GSTIN: z.string().optional(),
+  SELLER_ADDRESS: z.string().optional(),
+  SELLER_SAC_CODE: z.string().optional(),
+  // mock = files are not really stored; s3 = any S3-compatible storage (AWS S3, Cloudflare R2, MinIO).
+  STORAGE_DRIVER: z.enum(['mock', 's3']).default('mock'),
+  S3_ENDPOINT: z.string().url().optional(),
+  S3_BUCKET: z.string().optional(),
+  S3_REGION: z.string().default('auto'),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  S3_PATH_STYLE: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
+  // mock = emails are only recorded; smtp = real email (needs the SMTP_* values and EMAIL_FROM).
+  EMAIL_DRIVER: z.enum(['mock', 'smtp']).default('mock'),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+  SMTP_SECURE: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
+  // mock = no money is sent; razorpayx = real bank/UPI payouts to drivers (needs the RAZORPAYX_* values).
+  PAYOUTS_DRIVER: z.enum(['mock', 'razorpayx']).default('mock'),
+  RAZORPAYX_KEY_ID: z.string().optional(),
+  RAZORPAYX_KEY_SECRET: z.string().optional(),
+  RAZORPAYX_ACCOUNT_NUMBER: z.string().optional(),
+  RAZORPAYX_WEBHOOK_SECRET: z.string().optional(),
+  // true = an approved settlement is paid out automatically; false = finance presses "pay".
+  AUTO_PAYOUTS: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // Lifts every rate limit so a load test measures the server, not the limits. Refused in production.
+  LOAD_TEST_MODE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   // Lets a metrics tool read GET /api/v1/metrics (Prometheus text) with `Authorization: Bearer <token>`. Empty = endpoint off.
   METRICS_TOKEN: z.string().min(16).optional(),
   // Where alerts go (a Slack/Discord-style incoming webhook that accepts { text }). Empty = log only.
@@ -60,7 +114,7 @@ const schema = z.object({
     .optional(),
 });
 
-export type Env = z.infer<typeof schema>;
+export type Env = Omit<z.infer<typeof schema>, 'STAFF_OTP_LOGIN'> & { STAFF_OTP_LOGIN: boolean };
 
 export class EnvValidationError extends Error {
   constructor(public readonly issues: string[]) {
@@ -76,7 +130,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`),
     );
   }
-  const env = parsed.data;
+  const env = {
+    ...parsed.data,
+    STAFF_OTP_LOGIN: parsed.data.STAFF_OTP_LOGIN ?? parsed.data.NODE_ENV !== 'production',
+  };
   if (env.NODE_ENV === 'production' && env.PROVIDER_MODE === 'mock') {
     throw new EnvValidationError(['PROVIDER_MODE: mock providers are not allowed in production']);
   }
@@ -98,6 +155,45 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new EnvValidationError([
       'JWT_REFRESH_SECRET: must differ from JWT_ACCESS_SECRET (one leaked secret must not open both)',
     ]);
+  }
+  if (env.NODE_ENV === 'production' && env.STAFF_OTP_LOGIN) {
+    throw new EnvValidationError([
+      'STAFF_OTP_LOGIN: not allowed in production (staff sign in with email, password and an authenticator)',
+    ]);
+  }
+  if (env.NODE_ENV === 'production' && env.LOAD_TEST_MODE) {
+    throw new EnvValidationError([
+      'LOAD_TEST_MODE: not allowed in production (it removes the rate limits)',
+    ]);
+  }
+  if (env.STORAGE_DRIVER === 's3') {
+    const missing = (
+      ['S3_ENDPOINT', 'S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'] as const
+    ).filter((k) => !env[k]);
+    if (missing.length > 0) {
+      throw new EnvValidationError([`STORAGE_DRIVER=s3 needs ${missing.join(', ')}`]);
+    }
+  }
+  if (env.EMAIL_DRIVER === 'smtp') {
+    const missing = (['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'EMAIL_FROM'] as const).filter(
+      (k) => !env[k],
+    );
+    if (missing.length > 0) {
+      throw new EnvValidationError([`EMAIL_DRIVER=smtp needs ${missing.join(', ')}`]);
+    }
+  }
+  if (env.PAYOUTS_DRIVER === 'razorpayx') {
+    const missing = (
+      [
+        'RAZORPAYX_KEY_ID',
+        'RAZORPAYX_KEY_SECRET',
+        'RAZORPAYX_ACCOUNT_NUMBER',
+        'RAZORPAYX_WEBHOOK_SECRET',
+      ] as const
+    ).filter((k) => !env[k]);
+    if (missing.length > 0) {
+      throw new EnvValidationError([`PAYOUTS_DRIVER=razorpayx needs ${missing.join(', ')}`]);
+    }
   }
   if (env.SMS_DRIVER === 'nimbus') {
     const missing = (

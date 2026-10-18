@@ -532,7 +532,7 @@
           }
         },
         {
-          "name": "POST /drivers/me/documents - Register a KYC document; returns a signed upload URL",
+          "name": "POST /drivers/me/documents - Register a KYC document; returns a signed upload URL. Upload the file to that URL with an HTTP PUT whose Content-Type header is exactly the contentType you declared (max 10 MB), then call the \"uploaded\" endpoint",
           "request": {
             "method": "POST",
             "header": [
@@ -578,6 +578,27 @@
                 "drivers",
                 "me",
                 "documents"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /drivers/me/documents/{documentId}/uploaded - Tell the server the file is uploaded. It looks in storage: the file must be there, under 10 MB and of the declared type. A bad file is deleted. Staff can approve a document only when its file is really there",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/documents/{{documentId}}/uploaded",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "documents",
+                "{{documentId}}",
+                "uploaded"
               ],
               "query": []
             }
@@ -1532,7 +1553,7 @@
           }
         },
         {
-          "name": "POST /fare-quotes - Server-calculated, expiring (10 min), single-use fare quote",
+          "name": "POST /fare-quotes - Server-calculated, expiring (10 min), single-use fare quote. Add scheduledFor (a pickup time between 30 minutes and 7 days from now) to price a ride for later; the zone must be open at that time",
           "request": {
             "method": "POST",
             "header": [
@@ -1611,7 +1632,7 @@
           }
         },
         {
-          "name": "POST /bookings - Create a booking from a valid quote. Requires Idempotency-Key; same key + same body returns the same booking (200, Idempotent-Replayed: true).",
+          "name": "POST /bookings - Create a booking from a valid quote. Requires Idempotency-Key; same key + same body returns the same booking (200, Idempotent-Replayed: true). For a ride for later send rideType SCHEDULED and the same scheduledFor as the quote: the booking waits as SCHEDULED, the search for a driver starts about 20 minutes before pickup, and cancelling before then is free. At most 5 waiting at a time.",
           "request": {
             "method": "POST",
             "header": [
@@ -1688,6 +1709,128 @@
                 "bookings",
                 "{{bookingId}}",
                 "events"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "PATCH /bookings/{bookingId}/schedule - Move a ride that is still waiting (SCHEDULED) to another pickup time (same limits as booking; the zone must be open then). 409 RIDE_INVALID_STATE once the search has started",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{bookingId}}/schedule",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings",
+                "{{bookingId}}",
+                "schedule"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scheduledFor\": \"2026-11-01T09:30:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /bookings - The rider's own bookings, newest first. With status=SCHEDULED: the rides waiting for later, soonest first. Paged",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /admin/bookings/{bookingId}/scheduled/cancel - Cancel a ride that is still waiting for its time (SCHEDULED) on the rider's behalf. Free; the rider is told. 409 once the search has started",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/bookings/{{bookingId}}/scheduled/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "bookings",
+                "{{bookingId}}",
+                "scheduled",
+                "cancel"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Rider asked us to cancel by phone\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /admin/bookings/{bookingId}/scheduled/start-now - Start the search for a waiting scheduled ride now (for example when the scheduled-rides job was down). Same as the automatic start",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/bookings/{{bookingId}}/scheduled/start-now",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "bookings",
+                "{{bookingId}}",
+                "scheduled",
+                "start-now"
               ],
               "query": []
             }
@@ -2859,7 +3002,7 @@
           }
         },
         {
-          "name": "POST /admin/bookings/{bookingId}/refund - Refund (part of) an online payment through Razorpay. Needs an Idempotency-Key. Never more than was paid in total; completes when the refund webhook arrives. The platform bears the cost; the driver keeps their share",
+          "name": "POST /admin/bookings/{bookingId}/refund - Refund (part of) a payment. destination ORIGINAL (default) sends it back through Razorpay and completes when the refund webhook arrives; WALLET credits the rider’s wallet at once (the only choice for a ride paid from the wallet). Needs an Idempotency-Key. Never more than was paid in total. The platform bears the cost; the driver keeps their share",
           "request": {
             "method": "POST",
             "header": [
@@ -2887,7 +3030,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"amountPaise\": 5000,\n  \"reason\": \"Driver took a longer route\"\n}",
+              "raw": "{\n  \"amountPaise\": 5000,\n  \"reason\": \"Driver took a longer route\",\n  \"destination\": \"ORIGINAL\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3393,7 +3536,7 @@
           }
         },
         {
-          "name": "POST /admin/staff - Create a staff account by phone number and role; the person then signs in with the usual OTP",
+          "name": "POST /admin/staff - Create a staff account by phone number and role. With an email the person gets a setup link (password + authenticator); without one they sign in with a phone code, which is refused in production",
           "request": {
             "method": "POST",
             "header": [
@@ -3450,6 +3593,40 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"role\": \"OPS\",\n  \"reason\": \"Moved to the operations desk\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /admin/staff/{userId}/credentials - Give a staff member an email login, or reset a lost password / authenticator: emails a new setup link and ends their old logins. Super admin only",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff/{{userId}}/credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff",
+                "{{userId}}",
+                "credentials"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"meera@example.com\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4555,6 +4732,1859 @@
                 "metrics"
               ],
               "query": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tips",
+      "item": [
+        {
+          "name": "POST /rides/{rideId}/tip - Rider tips the driver after a completed ride (within 24 hours, Rs 10 to Rs 2,000, one tip per ride). source ONLINE returns a checkout to pay through Razorpay; WALLET pays at once from the wallet balance. The driver receives all of it (no commission). Needs an Idempotency-Key. Needs the TIPS feature on",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "tip-{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rides/{{rideId}}/tip",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rides",
+                "{{rideId}}",
+                "tip"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountPaise\": 5000,\n  \"source\": \"ONLINE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /rides/{rideId}/tip - The tip on this ride, or { tip: null }. The rider also gets the payment details to finish paying; the driver sees it once it is paid",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rides/{{rideId}}/tip",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rides",
+                "{{rideId}}",
+                "tip"
+              ],
+              "query": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wallet",
+      "item": [
+        {
+          "name": "GET /wallet - The rider’s wallet: balance, the limits, and the latest entries (money in positive, money out negative). Needs the WALLET feature on for changes, not for looking",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/wallet",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "wallet"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /wallet/topups - Add money: starts an online payment (Rs 50 to Rs 5,000 each; the wallet holds at most Rs 10,000). Finish it with the usual checkout and /payments/verify; the wallet is credited when the payment is confirmed. Needs an Idempotency-Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "topup-{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/wallet/topups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "wallet",
+                "topups"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountPaise\": 50000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /bookings/{bookingId}/pay-from-wallet - Pay what a booking owes (fare or fee) from the wallet balance, at once. 402 INSUFFICIENT_WALLET_BALANCE if there is not enough. Needs an Idempotency-Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "wallet-{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{bookingId}}/pay-from-wallet",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings",
+                "{{bookingId}}",
+                "pay-from-wallet"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /admin/wallets/{customerId} - A rider’s wallet balance and latest entries, for support and finance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/wallets/{{customerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "wallets",
+                "{{customerId}}"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payouts",
+      "item": [
+        {
+          "name": "GET /drivers/me/payout-account - Where the driver’s earnings are sent: type, holder name, hidden number, and review status (PENDING until finance checks it, then ACTIVE or REJECTED), or { account: null }",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/payout-account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "payout-account"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "PUT /drivers/me/payout-account - Save (or replace) the bank account or UPI id for payouts. The full number goes to the payout service only; we keep the last 4 digits. A new or changed account is PENDING until finance verifies it",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/payout-account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "payout-account"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"BANK\",\n  \"holderName\": \"Ravi Kumar\",\n  \"accountNumber\": \"123456789012\",\n  \"ifsc\": \"HDFC0001234\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /admin/drivers/{driverId}/payout-account - A driver’s payout account (numbers hidden) and its review status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/drivers/{{driverId}}/payout-account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "drivers",
+                "{{driverId}}",
+                "payout-account"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /admin/drivers/{driverId}/payout-account/review - Approve or reject a new or changed payout account (confirm the holder name matches the driver first). No money is sent to an account that is not ACTIVE",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/drivers/{{driverId}}/payout-account/review",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "drivers",
+                "{{driverId}}",
+                "payout-account",
+                "review"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"APPROVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /admin/settlements/{settlementId}/payout - Send an APPROVED settlement’s payout to the driver’s verified account through the payout service. Safe to repeat: a payout already on its way is returned, never sent twice. The settlement becomes PAID when the service confirms (webhook). Not used if AUTO_PAYOUTS is on",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/settlements/{{settlementId}}/payout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "settlements",
+                "{{settlementId}}",
+                "payout"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /admin/settlements/{settlementId}/payouts - Every payout attempt for a settlement (status CREATED | PROCESSING | PAID | FAILED | REVERSED, bank reference, failure reason)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/settlements/{{settlementId}}/payouts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "settlements",
+                "{{settlementId}}",
+                "payouts"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /admin/payouts - Payout attempts, newest first, filtered by status or driver",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/payouts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "payouts"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "driverId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /dev/payouts/{payoutId}/complete - DEVELOPMENT ONLY (mock payouts): pretend the bank confirmed the transfer. Not available when real payouts are on",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dev/payouts/{{payoutId}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dev",
+                "payouts",
+                "{{payoutId}}",
+                "complete"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /webhooks/razorpayx - The payout service (RazorpayX) calls this, not the apps. Signature checked on the raw body; each event id is processed once. payout.processed, payout.failed / rejected, payout.reversed",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "X-Razorpay-Signature",
+                "value": "hex hmac of the raw body"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/webhooks/razorpayx",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhooks",
+                "razorpayx"
+              ],
+              "query": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "item": [
+        {
+          "name": "GET /admin/analytics/demand - When people ask for rides: a Monday-to-Sunday by hour (India time) grid of requests and completed rides, plus the split by zone. Period default last 28 days, at most 92",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/analytics/demand",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "analytics",
+                "demand"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "zoneId",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /admin/analytics/fulfilment - How well demand is served, hour by hour (India time): requests, completed, no driver found, cancelled, rates, and average seconds to find a driver",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/analytics/fulfilment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "analytics",
+                "fulfilment"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "zoneId",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /admin/analytics/cancellations - Why rides are lost: share by who cancelled, by reason (with how many minutes after the request), and the cancellation / no-show fees due or waived",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/analytics/cancellations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "analytics",
+                "cancellations"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "zoneId",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /admin/analytics/drivers - Drivers ranked by completed rides: earnings, tips, how often they accept offers, rating. Staff only",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/analytics/drivers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "analytics",
+                "drivers"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "zoneId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /admin/analytics/retention - Active riders and drivers in the last 24 hours / 7 / 30 days, and weekly groups of new riders with the share who rode again in each following week",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/analytics/retention",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "analytics",
+                "retention"
+              ],
+              "query": [
+                {
+                  "key": "weeks",
+                  "value": "8",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /admin/analytics/revenue - Money by day (India time): fares, discounts, commission, driver earnings, tips, refunds, and what was collected by method (card or wallet) and purpose",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/analytics/revenue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "analytics",
+                "revenue"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "zoneId",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Corporate",
+      "item": [
+        {
+          "name": "GET /corporate/me - Your company account: the company, your limits and what you have used this month, and any invitations waiting for you (matched by your phone number)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/corporate/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "corporate",
+                "me"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /corporate/invitations/{membershipId}/accept - Accept an invitation to a company account. You can be in one company at a time",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/corporate/invitations/{{membershipId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "corporate",
+                "invitations",
+                "{{membershipId}}",
+                "accept"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /corporate/me/leave - Leave your company account (the only admin cannot leave)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/corporate/me/leave",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "corporate",
+                "me",
+                "leave"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /corporate/employees - Company admin: the company's people with their monthly limit and what each has used this month",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/corporate/employees",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "corporate",
+                "employees"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /corporate/employees - Company admin: invite an employee by phone number (they accept in the app). Optional own monthly limit and role",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/corporate/employees",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "corporate",
+                "employees"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+919812300000\",\n  \"name\": \"Asha Rao\",\n  \"role\": \"EMPLOYEE\",\n  \"monthlyLimitPaise\": 500000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "PATCH /corporate/employees/{membershipId} - Company admin: change an employee's monthly limit or role, or remove them. You cannot remove or demote yourself",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/corporate/employees/{{membershipId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "corporate",
+                "employees",
+                "{{membershipId}}"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"monthlyLimitPaise\": 800000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /corporate/rides - Company admin: every ride billed to the company, newest first, with the rider, route, company reference and whether it is invoiced",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/corporate/rides",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "corporate",
+                "rides"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /corporate/invoices - Company admin: the company's issued and paid invoices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/corporate/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "corporate",
+                "invoices"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /corporate/invoices/{invoiceId} - Company admin: one invoice with all its lines",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/corporate/invoices/{{invoiceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "corporate",
+                "invoices",
+                "{{invoiceId}}"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /admin/corporate - Create a company account with its first admin (invited by phone). Defaults: credit limit Rs 50,000, payment terms 15 days, Rs 10,000 per employee per month",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/corporate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "corporate"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Acme Travels Pvt Ltd\",\n  \"billingEmail\": \"accounts@acme.example\",\n  \"adminPhone\": \"+919812300000\",\n  \"adminName\": \"Asha Rao\",\n  \"creditLimitPaise\": 5000000,\n  \"paymentTermsDays\": 15,\n  \"defaultEmployeeMonthlyLimitPaise\": 1000000,\n  \"perRideCapPaise\": 300000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /admin/corporate - Company accounts, by name",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/corporate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "corporate"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /admin/corporate/{companyId} - One company with its admins, how much it owes, rides not yet billed, credit still available and invoiced-unpaid",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/corporate/{{companyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "corporate",
+                "{{companyId}}"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "PATCH /admin/corporate/{companyId} - Change a company's limits, terms or status (SUSPENDED stops new rides on the account at once)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/corporate/{{companyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "corporate",
+                "{{companyId}}"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"creditLimitPaise\": 8000000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /admin/corporate/{companyId}/invoices - Gather the company's billed rides and fees accrued in a period into a DRAFT invoice. Each ride is on one invoice only. Tax is not calculated by the system",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/corporate/{{companyId}}/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "corporate",
+                "{{companyId}}",
+                "invoices"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"2026-10-01T00:00:00.000Z\",\n  \"to\": \"2026-11-01T00:00:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /admin/corporate-invoices - Invoices across companies, newest first; overdue=true for issued invoices past their due date",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/corporate-invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "corporate-invoices"
+              ],
+              "query": [
+                {
+                  "key": "companyId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "overdue",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /admin/corporate-invoices/{invoiceId} - One invoice with its lines and payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/corporate-invoices/{{invoiceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "corporate-invoices",
+                "{{invoiceId}}"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /admin/corporate-invoices/{invoiceId}/issue - Issue a draft: gives it its number (CI-year-sequence) and a due date from the company's terms",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/corporate-invoices/{{invoiceId}}/issue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "corporate-invoices",
+                "{{invoiceId}}",
+                "issue"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /admin/corporate-invoices/{invoiceId}/void - Cancel a draft or an unpaid issued invoice; its rides can go on a new invoice",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/corporate-invoices/{{invoiceId}}/void",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "corporate-invoices",
+                "{{invoiceId}}",
+                "void"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /admin/corporate-invoices/{invoiceId}/payments - Record a bank payment from the company (part or all). Needs an Idempotency-Key; a repeat returns the same result. Never more than is left to pay",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "corp-pay-{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/corporate-invoices/{{invoiceId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "corporate-invoices",
+                "{{invoiceId}}",
+                "payments"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountPaise\": 1500000,\n  \"reference\": \"NEFT UTR123456789\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /admin/corporate-bookings/{bookingId}/credit - Take (part of) a company ride's charge off what the company owes, before it is invoiced. The platform bears the cost; the driver keeps their share",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/corporate-bookings/{{bookingId}}/credit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "corporate-bookings",
+                "{{bookingId}}",
+                "credit"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountPaise\": 5000,\n  \"reason\": \"Driver took a longer route\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Staff login",
+      "item": [
+        {
+          "name": "POST /auth/staff/setup - Step 1 of a new staff account (from the emailed link, valid 3 days, single use): choose a password (12+ characters, not common, not your name or email). Returns the authenticator secret to scan and a short-lived setupSession",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/staff/setup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "staff",
+                "setup"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inviteToken\": \"<from the email link>\",\n  \"password\": \"a long unusual password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /auth/staff/setup/confirm - Step 2: enter the first 6-digit code from the authenticator app. Turns two-step sign-in on, signs the person in, and returns 8 one-time recovery codes (shown only now)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/staff/setup/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "staff",
+                "setup",
+                "confirm"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"setupSession\": \"<from step 1>\",\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /auth/staff/login - Staff sign-in step 1: email and password. Answers { mfaRequired, mfaToken } (valid 5 minutes). Wrong details always give the same answer; 5 wrong attempts lock the account for 15 minutes",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/staff/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "staff",
+                "login"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"meera@example.com\",\n  \"password\": \"...\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /auth/staff/mfa - Staff sign-in step 2: the 6-digit authenticator code (each code works once) or a recovery code. Returns the session tokens. Staff sessions last 12 hours",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/staff/mfa",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "staff",
+                "mfa"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mfaToken\": \"<from step 1>\",\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /auth/staff/password/forgot - Email a reset link (valid 1 hour). Always answers the same, so nobody can find out who has an account",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/staff/password/forgot",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "staff",
+                "password",
+                "forgot"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"meera@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /auth/staff/password/reset - Choose a new password with the emailed link AND a code from the authenticator (or a recovery code). Signs out every old login",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/staff/password/reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "staff",
+                "password",
+                "reset"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resetToken\": \"<from the email link>\",\n  \"password\": \"a new long password\",\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /auth/staff/password/change - Change your own password (needs the current password and a fresh authenticator code). Your other logins end; this one stays",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/staff/password/change",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "staff",
+                "password",
+                "change"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"...\",\n  \"newPassword\": \"...\",\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Privacy",
+      "item": [
+        {
+          "name": "GET /me/data-export - A copy of your data as JSON: account, bookings, payments, wallet, tips, ratings you gave, support tickets, emergency contacts, devices, and (drivers) vehicles and document status. Once every 5 minutes. Money records are kept by law even after deletion",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/me/data-export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "data-export"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /me/deletion - Whether you have asked to delete your account, when it will happen, and anything that must be sorted out first (an unfinished ride, an unpaid amount, wallet money, a driver settlement)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/me/deletion",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "deletion"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /me/deletion - Ask to delete your account. It happens after 7 days (cancel any time before); refused while something is unresolved. Your name and phone are removed and the phone number can be used again; money records stay, anonymised",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me/deletion",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "deletion"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirm\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /me/deletion - Cancel a deletion request while it is waiting",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/me/deletion",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "deletion"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /admin/users/{userId}/delete - Delete an account now (for example a legal request), under the same conditions. Recorded in the audit log",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/delete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "delete"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Erasure request received by email\",\n  \"confirm\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Trips",
+      "item": [
+        {
+          "name": "POST /admin/rental-packages - Create an hourly rental package for a zone and cab type",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/rental-packages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "rental-packages"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"zoneId\": \"<zoneId>\",\n  \"categoryId\": \"<categoryId>\",\n  \"name\": \"4 hours / 40 km\",\n  \"hours\": 4,\n  \"includedKm\": 40,\n  \"pricePaise\": 120000,\n  \"extraKmPaise\": 1800,\n  \"extraHourPaise\": 24000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /admin/rental-packages - List rental packages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/rental-packages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "rental-packages"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "PATCH /admin/rental-packages/{packageId} - Change a package price or switch it off (hours and km cannot change: make a new package)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/rental-packages/{{packageId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "rental-packages",
+                "{{packageId}}"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /admin/outstation-rates - Set outstation rates for a zone and cab type",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/outstation-rates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "outstation-rates"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"zoneId\": \"<zoneId>\",\n  \"categoryId\": \"<categoryId>\",\n  \"oneWayPerKmPaise\": 1800,\n  \"roundTripPerKmPaise\": 1400,\n  \"minKmPerDay\": 250,\n  \"driverAllowancePerNightPaise\": 30000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /admin/outstation-rates - List outstation rates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/outstation-rates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "outstation-rates"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "PATCH /admin/outstation-rates/{rateId} - Change outstation rates or switch them off",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/outstation-rates/{{rateId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "outstation-rates",
+                "{{rateId}}"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"oneWayPerKmPaise\": 1900\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /rental-packages - Rental packages available at a location (then quote with rentalPackageId)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rental-packages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rental-packages"
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "12.97",
+                  "disabled": false
+                },
+                {
+                  "key": "lng",
+                  "value": "77.59",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /outstation/options - Cab types and per-km rates for outstation trips from a location (then quote with outstation)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/outstation/options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "outstation",
+                "options"
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "12.97",
+                  "disabled": false
+                },
+                {
+                  "key": "lng",
+                  "value": "77.59",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /drivers/me/preferences - Which long trips the driver accepts (rentals, outstation)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "preferences"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "PATCH /drivers/me/preferences - Choose whether to be offered rentals and outstation trips",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "preferences"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"acceptsOutstation\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         }

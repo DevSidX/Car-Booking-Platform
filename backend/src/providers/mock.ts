@@ -21,6 +21,13 @@ export type MockOptions = {
   onOtp?: (phone: string, otp: string) => void;
   /** Called for every text message the mock "sends" (emergency alerts). */
   onText?: (phone: string, message: string) => void;
+  /**
+   * Files the mock storage "holds". Left out, every file is assumed to be there (so a developer
+   * without real storage can still approve documents); give a map to test the real checks.
+   */
+  objects?: Map<string, { sizeBytes: number; contentType: string }>;
+  /** Called for every email the mock "sends". */
+  onEmail?: (message: { to: string; subject: string; text: string }) => void;
   /** Called for every push the mock "delivers". */
   onPush?: (token: string, payload: PushPayload) => void;
   /** Lets a test make a token fail: 'invalid' = dead token, 'error' = temporary outage. */
@@ -53,6 +60,12 @@ export function createMockProviders(options: MockOptions = {}): Providers {
         return { providerMessageId: `mock_sms_${randomUUID()}` };
       },
     },
+    email: {
+      async send({ to, subject, text }) {
+        options.onEmail?.({ to, subject, text });
+        return { providerMessageId: `mock_mail_${randomUUID()}` };
+      },
+    },
     push: {
       async send(token, payload) {
         const failure = options.pushFailure?.(token);
@@ -75,6 +88,19 @@ export function createMockProviders(options: MockOptions = {}): Providers {
         return { refundId: `mock_refund_${randomUUID()}`, status: 'pending' as const };
       },
     },
+    // Pretends to send money and always says "on its way"; a development route finishes it.
+    payouts: {
+      async createFundAccount() {
+        return { contactId: `mock_cont_${randomUUID()}`, fundAccountId: `mock_fa_${randomUUID()}` };
+      },
+      async createPayout() {
+        return { payoutId: `mock_payout_${randomUUID()}`, status: 'processing' as const };
+      },
+      async getPayout(payoutId) {
+        return { payoutId, status: 'processing' as const };
+      },
+      verifyWebhookSignature: () => false,
+    },
     storage: {
       async createUploadUrl(objectKey) {
         return {
@@ -87,6 +113,14 @@ export function createMockProviders(options: MockOptions = {}): Providers {
           url: `http://localhost/mock-download/${encodeURIComponent(objectKey)}`,
           expiresInSeconds: 300,
         };
+      },
+      async statObject(objectKey) {
+        if (!options.objects) return { exists: true as const, sizeBytes: 100_000 };
+        const o = options.objects.get(objectKey);
+        return o ? { exists: true as const, ...o } : { exists: false as const };
+      },
+      async deleteObject(objectKey) {
+        options.objects?.delete(objectKey);
       },
     },
   };

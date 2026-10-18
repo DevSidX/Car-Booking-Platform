@@ -156,7 +156,8 @@ export const routes: RouteDoc[] = [
     method: 'post',
     path: '/drivers/me/documents',
     tag: 'Drivers',
-    summary: 'Register a KYC document; returns a signed upload URL',
+    summary:
+      'Register a KYC document; returns a signed upload URL. Upload the file to that URL with an HTTP PUT whose Content-Type header is exactly the contentType you declared (max 10 MB), then call the "uploaded" endpoint',
     auth: ['DRIVER'],
     body: {
       type: 'DRIVING_LICENCE',
@@ -341,7 +342,8 @@ export const routes: RouteDoc[] = [
     method: 'post',
     path: '/fare-quotes',
     tag: 'Booking',
-    summary: 'Server-calculated, expiring (10 min), single-use fare quote',
+    summary:
+      'Server-calculated, expiring (10 min), single-use fare quote. Add scheduledFor (a pickup time between 30 minutes and 7 days from now) to price a ride for later; the zone must be open at that time',
     auth: ['CUSTOMER'],
     body: {
       pickup: { lat: 28.6315, lng: 77.2167, label: 'Connaught Place, New Delhi' },
@@ -372,7 +374,7 @@ export const routes: RouteDoc[] = [
     path: '/bookings',
     tag: 'Booking',
     summary:
-      'Create a booking from a valid quote. Requires Idempotency-Key; same key + same body returns the same booking (200, Idempotent-Replayed: true).',
+      'Create a booking from a valid quote. Requires Idempotency-Key; same key + same body returns the same booking (200, Idempotent-Replayed: true). For a ride for later send rideType SCHEDULED and the same scheduledFor as the quote: the booking waits as SCHEDULED, the search for a driver starts about 20 minutes before pickup, and cancelling before then is free. At most 5 waiting at a time.',
     auth: ['CUSTOMER'],
     headers: { 'Idempotency-Key': 'booking-{{$guid}}' },
     body: {
@@ -870,10 +872,10 @@ export const routes: RouteDoc[] = [
     path: '/admin/bookings/{bookingId}/refund',
     tag: 'Finance',
     summary:
-      'Refund (part of) an online payment through Razorpay. Needs an Idempotency-Key. Never more than was paid in total; completes when the refund webhook arrives. The platform bears the cost; the driver keeps their share',
+      'Refund (part of) a payment. destination ORIGINAL (default) sends it back through Razorpay and completes when the refund webhook arrives; WALLET credits the rider’s wallet at once (the only choice for a ride paid from the wallet). Needs an Idempotency-Key. Never more than was paid in total. The platform bears the cost; the driver keeps their share',
     auth: ['FINANCE', 'SUPER_ADMIN'],
     headers: { 'Idempotency-Key': 'refund-{{$guid}}' },
-    body: { amountPaise: 5000, reason: 'Driver took a longer route' },
+    body: { amountPaise: 5000, reason: 'Driver took a longer route', destination: 'ORIGINAL' },
   },
   {
     method: 'post',
@@ -1031,7 +1033,7 @@ export const routes: RouteDoc[] = [
     path: '/admin/staff',
     tag: 'Staff',
     summary:
-      'Create a staff account by phone number and role; the person then signs in with the usual OTP',
+      'Create a staff account by phone number and role. With an email the person gets a setup link (password + authenticator); without one they sign in with a phone code, which is refused in production',
     auth: ['SUPER_ADMIN'],
     body: { phone: '+919876500001', name: 'Meera Nair', role: 'SUPPORT' },
   },
@@ -1368,5 +1370,617 @@ export const routes: RouteDoc[] = [
     summary:
       'The same numbers as Prometheus text for a metrics tool. Not a staff login: send Authorization: Bearer <METRICS_TOKEN>. Returns 404 when no token is configured',
     auth: 'public',
+  },
+  {
+    method: 'post',
+    path: '/rides/{rideId}/tip',
+    tag: 'Tips',
+    summary:
+      'Rider tips the driver after a completed ride (within 24 hours, Rs 10 to Rs 2,000, one tip per ride). source ONLINE returns a checkout to pay through Razorpay; WALLET pays at once from the wallet balance. The driver receives all of it (no commission). Needs an Idempotency-Key. Needs the TIPS feature on',
+    auth: ['CUSTOMER'],
+    headers: { 'Idempotency-Key': 'tip-{{$guid}}' },
+    body: { amountPaise: 5000, source: 'ONLINE' },
+  },
+  {
+    method: 'get',
+    path: '/rides/{rideId}/tip',
+    tag: 'Tips',
+    summary:
+      'The tip on this ride, or { tip: null }. The rider also gets the payment details to finish paying; the driver sees it once it is paid',
+    auth: ['CUSTOMER', 'DRIVER'],
+  },
+  {
+    method: 'get',
+    path: '/wallet',
+    tag: 'Wallet',
+    summary:
+      'The rider’s wallet: balance, the limits, and the latest entries (money in positive, money out negative). Needs the WALLET feature on for changes, not for looking',
+    auth: ['CUSTOMER'],
+    query: { limit: '20' },
+  },
+  {
+    method: 'post',
+    path: '/wallet/topups',
+    tag: 'Wallet',
+    summary:
+      'Add money: starts an online payment (Rs 50 to Rs 5,000 each; the wallet holds at most Rs 10,000). Finish it with the usual checkout and /payments/verify; the wallet is credited when the payment is confirmed. Needs an Idempotency-Key',
+    auth: ['CUSTOMER'],
+    headers: { 'Idempotency-Key': 'topup-{{$guid}}' },
+    body: { amountPaise: 50000 },
+  },
+  {
+    method: 'post',
+    path: '/bookings/{bookingId}/pay-from-wallet',
+    tag: 'Wallet',
+    summary:
+      'Pay what a booking owes (fare or fee) from the wallet balance, at once. 402 INSUFFICIENT_WALLET_BALANCE if there is not enough. Needs an Idempotency-Key',
+    auth: ['CUSTOMER'],
+    headers: { 'Idempotency-Key': 'wallet-{{$guid}}' },
+  },
+  {
+    method: 'get',
+    path: '/admin/wallets/{customerId}',
+    tag: 'Wallet',
+    summary: 'A rider’s wallet balance and latest entries, for support and finance',
+    auth: ['SUPPORT', 'OPS', 'FINANCE', 'SUPER_ADMIN'],
+    query: { limit: '20' },
+  },
+  {
+    method: 'get',
+    path: '/drivers/me/payout-account',
+    tag: 'Payouts',
+    summary:
+      'Where the driver’s earnings are sent: type, holder name, hidden number, and review status (PENDING until finance checks it, then ACTIVE or REJECTED), or { account: null }',
+    auth: ['DRIVER'],
+  },
+  {
+    method: 'put',
+    path: '/drivers/me/payout-account',
+    tag: 'Payouts',
+    summary:
+      'Save (or replace) the bank account or UPI id for payouts. The full number goes to the payout service only; we keep the last 4 digits. A new or changed account is PENDING until finance verifies it',
+    auth: ['DRIVER'],
+    body: {
+      type: 'BANK',
+      holderName: 'Ravi Kumar',
+      accountNumber: '123456789012',
+      ifsc: 'HDFC0001234',
+    },
+  },
+  {
+    method: 'get',
+    path: '/admin/drivers/{driverId}/payout-account',
+    tag: 'Payouts',
+    summary: 'A driver’s payout account (numbers hidden) and its review status',
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+  },
+  {
+    method: 'post',
+    path: '/admin/drivers/{driverId}/payout-account/review',
+    tag: 'Payouts',
+    summary:
+      'Approve or reject a new or changed payout account (confirm the holder name matches the driver first). No money is sent to an account that is not ACTIVE',
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+    body: { decision: 'APPROVE' },
+  },
+  {
+    method: 'post',
+    path: '/admin/settlements/{settlementId}/payout',
+    tag: 'Payouts',
+    summary:
+      'Send an APPROVED settlement’s payout to the driver’s verified account through the payout service. Safe to repeat: a payout already on its way is returned, never sent twice. The settlement becomes PAID when the service confirms (webhook). Not used if AUTO_PAYOUTS is on',
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+  },
+  {
+    method: 'get',
+    path: '/admin/settlements/{settlementId}/payouts',
+    tag: 'Payouts',
+    summary:
+      'Every payout attempt for a settlement (status CREATED | PROCESSING | PAID | FAILED | REVERSED, bank reference, failure reason)',
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+  },
+  {
+    method: 'get',
+    path: '/admin/payouts',
+    tag: 'Payouts',
+    summary: 'Payout attempts, newest first, filtered by status or driver',
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+    query: { status: '', driverId: '', page: '1', limit: '20' },
+  },
+  {
+    method: 'post',
+    path: '/dev/payouts/{payoutId}/complete',
+    tag: 'Payouts',
+    summary:
+      'DEVELOPMENT ONLY (mock payouts): pretend the bank confirmed the transfer. Not available when real payouts are on',
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+  },
+  {
+    method: 'post',
+    path: '/webhooks/razorpayx',
+    tag: 'Payouts',
+    summary:
+      'The payout service (RazorpayX) calls this, not the apps. Signature checked on the raw body; each event id is processed once. payout.processed, payout.failed / rejected, payout.reversed',
+    auth: 'public',
+    headers: { 'X-Razorpay-Signature': 'hex hmac of the raw body' },
+  },
+  {
+    method: 'get',
+    path: '/admin/analytics/demand',
+    tag: 'Analytics',
+    summary:
+      'When people ask for rides: a Monday-to-Sunday by hour (India time) grid of requests and completed rides, plus the split by zone. Period default last 28 days, at most 92',
+    auth: ['OPS', 'FINANCE', 'SUPER_ADMIN'],
+    query: { from: '', to: '', zoneId: '' },
+  },
+  {
+    method: 'get',
+    path: '/admin/analytics/fulfilment',
+    tag: 'Analytics',
+    summary:
+      'How well demand is served, hour by hour (India time): requests, completed, no driver found, cancelled, rates, and average seconds to find a driver',
+    auth: ['OPS', 'FINANCE', 'SUPER_ADMIN'],
+    query: { from: '', to: '', zoneId: '' },
+  },
+  {
+    method: 'get',
+    path: '/admin/analytics/cancellations',
+    tag: 'Analytics',
+    summary:
+      'Why rides are lost: share by who cancelled, by reason (with how many minutes after the request), and the cancellation / no-show fees due or waived',
+    auth: ['OPS', 'FINANCE', 'SUPER_ADMIN'],
+    query: { from: '', to: '', zoneId: '' },
+  },
+  {
+    method: 'get',
+    path: '/admin/analytics/drivers',
+    tag: 'Analytics',
+    summary:
+      'Drivers ranked by completed rides: earnings, tips, how often they accept offers, rating. Staff only',
+    auth: ['OPS', 'FINANCE', 'SUPER_ADMIN'],
+    query: { from: '', to: '', zoneId: '', limit: '20' },
+  },
+  {
+    method: 'get',
+    path: '/admin/analytics/retention',
+    tag: 'Analytics',
+    summary:
+      'Active riders and drivers in the last 24 hours / 7 / 30 days, and weekly groups of new riders with the share who rode again in each following week',
+    auth: ['OPS', 'FINANCE', 'SUPER_ADMIN'],
+    query: { weeks: '8' },
+  },
+  {
+    method: 'get',
+    path: '/admin/analytics/revenue',
+    tag: 'Analytics',
+    summary:
+      'Money by day (India time): fares, discounts, commission, driver earnings, tips, refunds, and what was collected by method (card or wallet) and purpose',
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+    query: { from: '', to: '', zoneId: '' },
+  },
+  {
+    method: 'patch',
+    path: '/bookings/{bookingId}/schedule',
+    tag: 'Booking',
+    summary:
+      'Move a ride that is still waiting (SCHEDULED) to another pickup time (same limits as booking; the zone must be open then). 409 RIDE_INVALID_STATE once the search has started',
+    auth: ['CUSTOMER'],
+    body: { scheduledFor: '2026-11-01T09:30:00.000Z' },
+  },
+  {
+    method: 'get',
+    path: '/bookings',
+    tag: 'Booking',
+    summary:
+      "The rider's own bookings, newest first. With status=SCHEDULED: the rides waiting for later, soonest first. Paged",
+    auth: ['CUSTOMER'],
+    query: { status: '', page: '1', limit: '20' },
+  },
+  {
+    method: 'post',
+    path: '/admin/bookings/{bookingId}/scheduled/cancel',
+    tag: 'Booking',
+    summary:
+      "Cancel a ride that is still waiting for its time (SCHEDULED) on the rider's behalf. Free; the rider is told. 409 once the search has started",
+    auth: ['OPS', 'SUPPORT', 'SUPER_ADMIN'],
+    body: { reason: 'Rider asked us to cancel by phone' },
+  },
+  {
+    method: 'post',
+    path: '/admin/bookings/{bookingId}/scheduled/start-now',
+    tag: 'Booking',
+    summary:
+      'Start the search for a waiting scheduled ride now (for example when the scheduled-rides job was down). Same as the automatic start',
+    auth: ['OPS', 'SUPER_ADMIN'],
+  },
+  {
+    method: 'get',
+    path: '/corporate/me',
+    tag: 'Corporate',
+    summary:
+      'Your company account: the company, your limits and what you have used this month, and any invitations waiting for you (matched by your phone number)',
+    auth: ['CUSTOMER'],
+  },
+  {
+    method: 'post',
+    path: '/corporate/invitations/{membershipId}/accept',
+    tag: 'Corporate',
+    summary: 'Accept an invitation to a company account. You can be in one company at a time',
+    auth: ['CUSTOMER'],
+  },
+  {
+    method: 'post',
+    path: '/corporate/me/leave',
+    tag: 'Corporate',
+    summary: 'Leave your company account (the only admin cannot leave)',
+    auth: ['CUSTOMER'],
+  },
+  {
+    method: 'get',
+    path: '/corporate/employees',
+    tag: 'Corporate',
+    summary:
+      "Company admin: the company's people with their monthly limit and what each has used this month",
+    auth: ['CUSTOMER'],
+  },
+  {
+    method: 'post',
+    path: '/corporate/employees',
+    tag: 'Corporate',
+    summary:
+      'Company admin: invite an employee by phone number (they accept in the app). Optional own monthly limit and role',
+    auth: ['CUSTOMER'],
+    body: { phone: '+919812300000', name: 'Asha Rao', role: 'EMPLOYEE', monthlyLimitPaise: 500000 },
+  },
+  {
+    method: 'patch',
+    path: '/corporate/employees/{membershipId}',
+    tag: 'Corporate',
+    summary:
+      "Company admin: change an employee's monthly limit or role, or remove them. You cannot remove or demote yourself",
+    auth: ['CUSTOMER'],
+    body: { monthlyLimitPaise: 800000 },
+  },
+  {
+    method: 'get',
+    path: '/corporate/rides',
+    tag: 'Corporate',
+    summary:
+      'Company admin: every ride billed to the company, newest first, with the rider, route, company reference and whether it is invoiced',
+    auth: ['CUSTOMER'],
+    query: { from: '', to: '', page: '1', limit: '20' },
+  },
+  {
+    method: 'get',
+    path: '/corporate/invoices',
+    tag: 'Corporate',
+    summary: "Company admin: the company's issued and paid invoices",
+    auth: ['CUSTOMER'],
+    query: { status: '', page: '1', limit: '20' },
+  },
+  {
+    method: 'get',
+    path: '/corporate/invoices/{invoiceId}',
+    tag: 'Corporate',
+    summary: 'Company admin: one invoice with all its lines',
+    auth: ['CUSTOMER'],
+  },
+  {
+    method: 'post',
+    path: '/admin/corporate',
+    tag: 'Corporate',
+    summary:
+      'Create a company account with its first admin (invited by phone). Defaults: credit limit Rs 50,000, payment terms 15 days, Rs 10,000 per employee per month',
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+    body: {
+      name: 'Acme Travels Pvt Ltd',
+      billingEmail: 'accounts@acme.example',
+      adminPhone: '+919812300000',
+      adminName: 'Asha Rao',
+      creditLimitPaise: 5000000,
+      paymentTermsDays: 15,
+      defaultEmployeeMonthlyLimitPaise: 1000000,
+      perRideCapPaise: 300000,
+    },
+  },
+  {
+    method: 'get',
+    path: '/admin/corporate',
+    tag: 'Corporate',
+    summary: 'Company accounts, by name',
+    auth: ['OPS', 'SUPPORT', 'FINANCE', 'SUPER_ADMIN'],
+    query: { status: '', q: '', page: '1', limit: '20' },
+  },
+  {
+    method: 'get',
+    path: '/admin/corporate/{companyId}',
+    tag: 'Corporate',
+    summary:
+      'One company with its admins, how much it owes, rides not yet billed, credit still available and invoiced-unpaid',
+    auth: ['OPS', 'SUPPORT', 'FINANCE', 'SUPER_ADMIN'],
+  },
+  {
+    method: 'patch',
+    path: '/admin/corporate/{companyId}',
+    tag: 'Corporate',
+    summary:
+      "Change a company's limits, terms or status (SUSPENDED stops new rides on the account at once)",
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+    body: { creditLimitPaise: 8000000 },
+  },
+  {
+    method: 'post',
+    path: '/admin/corporate/{companyId}/invoices',
+    tag: 'Corporate',
+    summary:
+      "Gather the company's billed rides and fees accrued in a period into a DRAFT invoice. Each ride is on one invoice only. Tax is not calculated by the system",
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+    body: { from: '2026-10-01T00:00:00.000Z', to: '2026-11-01T00:00:00.000Z' },
+  },
+  {
+    method: 'get',
+    path: '/admin/corporate-invoices',
+    tag: 'Corporate',
+    summary:
+      'Invoices across companies, newest first; overdue=true for issued invoices past their due date',
+    auth: ['OPS', 'SUPPORT', 'FINANCE', 'SUPER_ADMIN'],
+    query: { companyId: '', status: '', overdue: '', page: '1', limit: '20' },
+  },
+  {
+    method: 'get',
+    path: '/admin/corporate-invoices/{invoiceId}',
+    tag: 'Corporate',
+    summary: 'One invoice with its lines and payments',
+    auth: ['OPS', 'SUPPORT', 'FINANCE', 'SUPER_ADMIN'],
+  },
+  {
+    method: 'post',
+    path: '/admin/corporate-invoices/{invoiceId}/issue',
+    tag: 'Corporate',
+    summary:
+      "Issue a draft: gives it its number (CI-year-sequence) and a due date from the company's terms",
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+  },
+  {
+    method: 'post',
+    path: '/admin/corporate-invoices/{invoiceId}/void',
+    tag: 'Corporate',
+    summary: 'Cancel a draft or an unpaid issued invoice; its rides can go on a new invoice',
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+  },
+  {
+    method: 'post',
+    path: '/admin/corporate-invoices/{invoiceId}/payments',
+    tag: 'Corporate',
+    summary:
+      'Record a bank payment from the company (part or all). Needs an Idempotency-Key; a repeat returns the same result. Never more than is left to pay',
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+    headers: { 'Idempotency-Key': 'corp-pay-{{$guid}}' },
+    body: { amountPaise: 1500000, reference: 'NEFT UTR123456789' },
+  },
+  {
+    method: 'post',
+    path: '/admin/corporate-bookings/{bookingId}/credit',
+    tag: 'Corporate',
+    summary:
+      "Take (part of) a company ride's charge off what the company owes, before it is invoiced. The platform bears the cost; the driver keeps their share",
+    auth: ['FINANCE', 'SUPER_ADMIN'],
+    body: { amountPaise: 5000, reason: 'Driver took a longer route' },
+  },
+  {
+    method: 'post',
+    path: '/auth/staff/setup',
+    tag: 'Staff login',
+    summary:
+      'Step 1 of a new staff account (from the emailed link, valid 3 days, single use): choose a password (12+ characters, not common, not your name or email). Returns the authenticator secret to scan and a short-lived setupSession',
+    auth: 'public',
+    body: { inviteToken: '<from the email link>', password: 'a long unusual password' },
+  },
+  {
+    method: 'post',
+    path: '/auth/staff/setup/confirm',
+    tag: 'Staff login',
+    summary:
+      'Step 2: enter the first 6-digit code from the authenticator app. Turns two-step sign-in on, signs the person in, and returns 8 one-time recovery codes (shown only now)',
+    auth: 'public',
+    body: { setupSession: '<from step 1>', code: '123456' },
+  },
+  {
+    method: 'post',
+    path: '/auth/staff/login',
+    tag: 'Staff login',
+    summary:
+      'Staff sign-in step 1: email and password. Answers { mfaRequired, mfaToken } (valid 5 minutes). Wrong details always give the same answer; 5 wrong attempts lock the account for 15 minutes',
+    auth: 'public',
+    body: { email: 'meera@example.com', password: '...' },
+  },
+  {
+    method: 'post',
+    path: '/auth/staff/mfa',
+    tag: 'Staff login',
+    summary:
+      'Staff sign-in step 2: the 6-digit authenticator code (each code works once) or a recovery code. Returns the session tokens. Staff sessions last 12 hours',
+    auth: 'public',
+    body: { mfaToken: '<from step 1>', code: '123456' },
+  },
+  {
+    method: 'post',
+    path: '/auth/staff/password/forgot',
+    tag: 'Staff login',
+    summary:
+      'Email a reset link (valid 1 hour). Always answers the same, so nobody can find out who has an account',
+    auth: 'public',
+    body: { email: 'meera@example.com' },
+  },
+  {
+    method: 'post',
+    path: '/auth/staff/password/reset',
+    tag: 'Staff login',
+    summary:
+      'Choose a new password with the emailed link AND a code from the authenticator (or a recovery code). Signs out every old login',
+    auth: 'public',
+    body: { resetToken: '<from the email link>', password: 'a new long password', code: '123456' },
+  },
+  {
+    method: 'post',
+    path: '/auth/staff/password/change',
+    tag: 'Staff login',
+    summary:
+      'Change your own password (needs the current password and a fresh authenticator code). Your other logins end; this one stays',
+    auth: ['OPS', 'SUPPORT', 'FINANCE', 'SAFETY_ADMIN', 'CONFIG_ADMIN', 'SUPER_ADMIN'],
+    body: { currentPassword: '...', newPassword: '...', code: '123456' },
+  },
+  {
+    method: 'post',
+    path: '/admin/staff/{userId}/credentials',
+    tag: 'Staff',
+    summary:
+      'Give a staff member an email login, or reset a lost password / authenticator: emails a new setup link and ends their old logins. Super admin only',
+    auth: ['SUPER_ADMIN'],
+    body: { email: 'meera@example.com' },
+  },
+  {
+    method: 'get',
+    path: '/me/data-export',
+    tag: 'Privacy',
+    summary:
+      'A copy of your data as JSON: account, bookings, payments, wallet, tips, ratings you gave, support tickets, emergency contacts, devices, and (drivers) vehicles and document status. Once every 5 minutes. Money records are kept by law even after deletion',
+    auth: ['CUSTOMER', 'DRIVER'],
+  },
+  {
+    method: 'get',
+    path: '/me/deletion',
+    tag: 'Privacy',
+    summary:
+      'Whether you have asked to delete your account, when it will happen, and anything that must be sorted out first (an unfinished ride, an unpaid amount, wallet money, a driver settlement)',
+    auth: ['CUSTOMER', 'DRIVER'],
+  },
+  {
+    method: 'post',
+    path: '/me/deletion',
+    tag: 'Privacy',
+    summary:
+      'Ask to delete your account. It happens after 7 days (cancel any time before); refused while something is unresolved. Your name and phone are removed and the phone number can be used again; money records stay, anonymised',
+    auth: ['CUSTOMER', 'DRIVER'],
+    body: { confirm: true },
+  },
+  {
+    method: 'delete',
+    path: '/me/deletion',
+    tag: 'Privacy',
+    summary: 'Cancel a deletion request while it is waiting',
+    auth: ['CUSTOMER', 'DRIVER'],
+  },
+  {
+    method: 'post',
+    path: '/admin/users/{userId}/delete',
+    tag: 'Privacy',
+    summary:
+      'Delete an account now (for example a legal request), under the same conditions. Recorded in the audit log',
+    auth: ['SUPER_ADMIN'],
+    body: { reason: 'Erasure request received by email', confirm: true },
+  },
+  {
+    method: 'post',
+    path: '/drivers/me/documents/{documentId}/uploaded',
+    tag: 'Drivers',
+    summary:
+      'Tell the server the file is uploaded. It looks in storage: the file must be there, under 10 MB and of the declared type. A bad file is deleted. Staff can approve a document only when its file is really there',
+    auth: ['DRIVER'],
+  },
+  {
+    method: 'post',
+    path: '/admin/rental-packages',
+    tag: 'Trips',
+    summary: 'Create an hourly rental package for a zone and cab type',
+    auth: CONFIG,
+    body: {
+      zoneId: '<zoneId>',
+      categoryId: '<categoryId>',
+      name: '4 hours / 40 km',
+      hours: 4,
+      includedKm: 40,
+      pricePaise: 120000,
+      extraKmPaise: 1800,
+      extraHourPaise: 24000,
+    },
+  },
+  {
+    method: 'get',
+    path: '/admin/rental-packages',
+    tag: 'Trips',
+    summary: 'List rental packages',
+    auth: ['CONFIG_ADMIN', 'OPS', 'FINANCE', 'SUPER_ADMIN'],
+  },
+  {
+    method: 'patch',
+    path: '/admin/rental-packages/{packageId}',
+    tag: 'Trips',
+    summary:
+      'Change a package price or switch it off (hours and km cannot change: make a new package)',
+    auth: CONFIG,
+    body: { active: false },
+  },
+  {
+    method: 'post',
+    path: '/admin/outstation-rates',
+    tag: 'Trips',
+    summary: 'Set outstation rates for a zone and cab type',
+    auth: CONFIG,
+    body: {
+      zoneId: '<zoneId>',
+      categoryId: '<categoryId>',
+      oneWayPerKmPaise: 1800,
+      roundTripPerKmPaise: 1400,
+      minKmPerDay: 250,
+      driverAllowancePerNightPaise: 30000,
+    },
+  },
+  {
+    method: 'get',
+    path: '/admin/outstation-rates',
+    tag: 'Trips',
+    summary: 'List outstation rates',
+    auth: ['CONFIG_ADMIN', 'OPS', 'FINANCE', 'SUPER_ADMIN'],
+  },
+  {
+    method: 'patch',
+    path: '/admin/outstation-rates/{rateId}',
+    tag: 'Trips',
+    summary: 'Change outstation rates or switch them off',
+    auth: CONFIG,
+    body: { oneWayPerKmPaise: 1900 },
+  },
+  {
+    method: 'get',
+    path: '/rental-packages',
+    tag: 'Trips',
+    summary: 'Rental packages available at a location (then quote with rentalPackageId)',
+    auth: ['CUSTOMER'],
+    query: { lat: '12.97', lng: '77.59' },
+  },
+  {
+    method: 'get',
+    path: '/outstation/options',
+    tag: 'Trips',
+    summary:
+      'Cab types and per-km rates for outstation trips from a location (then quote with outstation)',
+    auth: ['CUSTOMER'],
+    query: { lat: '12.97', lng: '77.59' },
+  },
+  {
+    method: 'get',
+    path: '/drivers/me/preferences',
+    tag: 'Trips',
+    summary: 'Which long trips the driver accepts (rentals, outstation)',
+    auth: ['DRIVER'],
+  },
+  {
+    method: 'patch',
+    path: '/drivers/me/preferences',
+    tag: 'Trips',
+    summary: 'Choose whether to be offered rentals and outstation trips',
+    auth: ['DRIVER'],
+    body: { acceptsOutstation: true },
   },
 ];

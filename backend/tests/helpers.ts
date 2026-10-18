@@ -28,6 +28,7 @@ import type { Envelope } from '../src/realtime/events';
 import { createSocketBus, type SocketBus } from '../src/realtime/socketServer';
 import { createHmac } from 'node:crypto';
 import { createRazorpayPayments } from '../src/providers/razorpay';
+import { createRazorpayXPayouts } from '../src/providers/razorpayx';
 import type { FinanceConfig } from '../src/modules/ledger/finance.config';
 
 export const ACCESS_SECRET = 'a'.repeat(32);
@@ -49,6 +50,10 @@ export type TestEnv = {
   sockets: SocketBus;
   /** Every text message the fake SMS provider "sent" (emergency alerts), in order. */
   texts: { phone: string; message: string }[];
+  /** Files the fake storage holds. Only used when the environment is started with strictUploads. */
+  uploads: Map<string, { sizeBytes: number; contentType: string }>;
+  /** Every email the fake provider "sent", in order. */
+  emails: { to: string; subject: string; text: string }[];
   /** Every push the fake provider "delivered", in order. */
   pushed: { token: string; payload: PushPayload }[];
   /** Make a push token fail: 'invalid' = permanently dead, 'error' = temporary outage. */
@@ -57,6 +62,8 @@ export type TestEnv = {
   deliverPush: () => ReturnType<NotificationsService['deliverDue']>;
   /** A fake Razorpay behind the real adapter: real signatures, canned API answers. */
   razorpay: FakeRazorpay;
+  /** A fake RazorpayX behind the real payout adapter. */
+  razorpayx: FakeRazorpayX;
   /** Run the money repair job once (what the background job does every minute). */
   runFinance: () => Promise<unknown>;
   /** Open a socket as this user. Waits for the server's `hello`. Closed automatically on stop. */
@@ -83,6 +90,34 @@ export type FakeRazorpay = {
     options?: { eventId?: string; badSignature?: boolean },
   ) => Promise<import('supertest').Response>;
   captured: (orderId: string, paymentId: string, amount: number) => object;
+};
+
+export type FakeRazorpayX = {
+  /** What the server asked to be registered / sent, in order. */
+  fundAccounts: { id: string; contactName: string; kind: string }[];
+  payouts: {
+    id: string;
+    amount: number;
+    mode: string;
+    referenceId: string;
+    key: string;
+    status: string;
+  }[];
+  /** Make payout requests fail like an outage (the server gets no answer). */
+  failPayouts: boolean;
+  /** What the payout service answers when a payout is created. */
+  payoutStatus: 'processing' | 'processed' | 'failed';
+  /** Deliver a signed payout webhook to the server, exactly as RazorpayX would. */
+  webhook: (
+    body: object,
+    options?: { eventId?: string; badSignature?: boolean },
+  ) => Promise<import('supertest').Response>;
+  /** A payout.<status> event for a payout the fake knows. */
+  event: (
+    payoutId: string,
+    event: string,
+    extra?: { utr?: string; failure_reason?: string },
+  ) => object;
 };
 
 export type TestSocket = {
@@ -113,6 +148,8 @@ export async function startTestEnv(
     callerWriteLimitPerMinute?: number;
     couponGuessLimit?: number;
     metricsToken?: string;
+    /** Make the fake storage hold only the files a test puts there (default: every file is there). */
+    strictUploads?: boolean;
     corsOrigins?: string[];
     monitorConfig?: Partial<import('../src/modules/monitoring/monitor.service').MonitorConfig>;
     financeConfig?: Partial<FinanceConfig>;
@@ -132,12 +169,16 @@ export async function startTestEnv(
   const otps = new Map<string, string>();
   const pushed: TestEnv['pushed'] = [];
   const texts: TestEnv['texts'] = [];
+  const emails: TestEnv['emails'] = [];
+  const uploads: TestEnv['uploads'] = new Map();
   const failPush: TestEnv['failPush'] = new Map();
   const baseProviders = createProviders(
     { NODE_ENV: 'test', PROVIDER_MODE: 'mock' },
     {
       onOtp: (phone, otp) => otps.set(phone, otp),
       onText: (phone, message) => texts.push({ phone, message }),
+      onEmail: (m) => emails.push(m),
+      ...(appOverrides.strictUploads ? { objects: uploads } : {}),
       onPush: (token, payload) => pushed.push({ token, payload }),
       pushFailure: (token) => failPush.get(token),
     },
@@ -175,6 +216,29 @@ export async function startTestEnv(
       },
     }),
   };
+  const X_WEBHOOK_SECRET = 'rzpx_test_webhook_secret';
+  const razorpayx: FakeRazorpayX = {
+    fundAccounts: [],
+    payouts: [],
+    failPayouts: false,
+    payoutStatus: 'processing',
+    webhook: async (body, options = {}) => {
+      const raw = JSON.stringify(body);
+      const signature = options.badSignature
+        ? 'f'.repeat(64)
+        : createHmac('sha256', X_WEBHOOK_SECRET).update(raw).digest('hex');
+      return request(app)
+        .post('/api/v1/webhooks/razorpayx')
+        .set('content-type', 'application/json')
+        .set('x-razorpay-signature', signature)
+        .set('x-razorpay-event-id', options.eventId ?? `evx_${Math.random().toString(36).slice(2)}`)
+        .send(raw);
+    },
+    event: (payoutId, event, extra = {}) => ({
+      event,
+      payload: { payout: { entity: { id: payoutId, ...extra } } },
+    }),
+  };
   const fakeFetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
     const body = init?.body ? JSON.parse(String(init.body)) : {};
@@ -194,6 +258,45 @@ export async function startTestEnv(
         status: razorpay.refundStatus,
       });
     }
+    if (u.endsWith('/contacts'))
+      return json({ id: `cont_test_${razorpayx.fundAccounts.length + 1}` });
+    if (u.endsWith('/fund_accounts')) {
+      const id = `fa_test_${razorpayx.fundAccounts.length + 1}`;
+      razorpayx.fundAccounts.push({
+        id,
+        contactName: body.bank_account?.name ?? body.vpa?.address,
+        kind: body.account_type,
+      });
+      return json({ id });
+    }
+    if (u.endsWith('/payouts') && init?.method === 'POST') {
+      if (razorpayx.failPayouts) return json({ error: 'down' }, 500);
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      const key = headers['X-Payout-Idempotency'] ?? '';
+      const existing = razorpayx.payouts.find((p) => p.key === key);
+      if (existing) return json({ id: existing.id, status: existing.status });
+      const id = `pout_test_${razorpayx.payouts.length + 1}`;
+      razorpayx.payouts.push({
+        id,
+        amount: body.amount,
+        mode: body.mode,
+        referenceId: body.reference_id,
+        key,
+        status: razorpayx.payoutStatus,
+      });
+      return json({
+        id,
+        status: razorpayx.payoutStatus,
+        ...(razorpayx.payoutStatus === 'processed' ? { utr: `UTR${id}` } : {}),
+      });
+    }
+    if (u.includes('/payouts/')) {
+      const id = decodeURIComponent(u.split('/payouts/')[1]!);
+      const p = razorpayx.payouts.find((x) => x.id === id);
+      return p
+        ? json({ id, status: p.status, ...(p.status === 'processed' ? { utr: `UTR${id}` } : {}) })
+        : json({ error: 'not found' }, 404);
+    }
     return json({ error: 'unexpected' }, 404);
   }) as typeof fetch;
   const providers = {
@@ -202,6 +305,13 @@ export async function startTestEnv(
       keyId: razorpay.keyId,
       keySecret: KEY_SECRET,
       webhookSecret: WEBHOOK_SECRET,
+      fetchFn: fakeFetch,
+    }),
+    payouts: createRazorpayXPayouts({
+      keyId: 'rzpx_key',
+      keySecret: 'rzpx_secret',
+      accountNumber: '2323230000000000',
+      webhookSecret: X_WEBHOOK_SECRET,
       fetchFn: fakeFetch,
     }),
   };
@@ -214,6 +324,8 @@ export async function startTestEnv(
     otpResendSeconds: 0,
     otpMaxAttempts: 5,
     otpMaxPerHour: 1000,
+    staffOtpLogin: true,
+    staffRefreshTtlHours: 12,
     ...authOverrides,
   };
   const app = createApp({
@@ -274,9 +386,12 @@ export async function startTestEnv(
     sockets: socketBus,
     pushed,
     texts,
+    emails,
+    uploads,
     failPush,
     deliverPush: () => services.notifications.deliverDue(),
     razorpay,
+    razorpayx,
     runFinance: () => services.finance.run(),
     connect: (token, options = {}) =>
       new Promise<TestSocket>((resolve, reject) => {
@@ -339,6 +454,7 @@ export async function startTestEnv(
       await Promise.all(Object.values(mongoose.models).map((m) => m.collection.deleteMany({})));
       (app.locals['services'] as { flags: { invalidate: () => void } }).flags.invalidate();
       otps.clear();
+      emails.length = 0;
       fixedNow = null;
     },
   };

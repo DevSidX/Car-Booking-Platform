@@ -12,6 +12,7 @@ import { Booking } from '../bookings/booking.model';
 import { Accounts } from '../ledger/accounts';
 import type { FinanceConfig } from '../ledger/finance.config';
 import type { LedgerService } from '../ledger/ledger.service';
+import type { WalletService } from '../wallet/wallet.service';
 import { amountDue } from './amountDue';
 import { Payment } from './payment.model';
 import { Refund } from './refund.model';
@@ -31,6 +32,8 @@ export const refundSchema = z
   .object({
     amountPaise: z.number().int().min(1).max(10_000_000),
     reason: z.string().trim().min(3).max(300),
+    // ORIGINAL = back through the gateway (the default); WALLET = credited to the rider's wallet at once.
+    destination: z.enum(['ORIGINAL', 'WALLET']).default('ORIGINAL'),
   })
   .strict();
 
@@ -49,11 +52,14 @@ export type PaymentListQuery = z.infer<typeof paymentListQuerySchema>;
 type PaymentDoc = {
   _id: Types.ObjectId;
   publicId: string;
-  bookingId: Types.ObjectId;
-  bookingPublicId: string;
+  bookingId?: Types.ObjectId | null | undefined;
+  bookingPublicId?: string | null | undefined;
   customerId: Types.ObjectId;
   amountPaise: number;
   purpose: string;
+  method?: string | null | undefined;
+  payeeDriverId?: Types.ObjectId | null | undefined;
+  refPublicId?: string | null | undefined;
   status: string;
   providerOrderId: string;
   providerPaymentId?: string | null;
@@ -70,12 +76,16 @@ export function createPaymentsService(deps: {
   now: () => Date;
   logger: Logger;
   config: FinanceConfig;
+  wallet: WalletService;
 }) {
-  const { provider, ledger, audit, now, logger, config } = deps;
+  const { provider, ledger, audit, now, logger, config, wallet } = deps;
+  /** Told when a tip is paid (set by the tips service, which depends on this one). */
+  let paidHook: ((p: PaymentDoc) => Promise<void>) | null = null;
 
   const view = (p: PaymentDoc) => ({
     paymentId: p.publicId,
-    bookingId: p.bookingPublicId,
+    bookingId: p.bookingPublicId ?? null,
+    method: p.method ?? 'GATEWAY',
     orderId: p.providerOrderId,
     amountPaise: p.amountPaise,
     currency: 'INR',
@@ -86,7 +96,11 @@ export function createPaymentsService(deps: {
     expiresAt: p.expiresAt,
     createdAt: p.createdAt,
     // What the app's checkout screen needs. The secret key never leaves the server.
-    checkout: { key: provider.checkoutKey, orderId: p.providerOrderId, amountPaise: p.amountPaise },
+    // (Nothing to check out when it was paid from the wallet.)
+    checkout:
+      p.method === 'WALLET'
+        ? null
+        : { key: provider.checkoutKey, orderId: p.providerOrderId, amountPaise: p.amountPaise },
   });
 
   /* ---------------- paying ---------------- */
@@ -101,13 +115,15 @@ export function createPaymentsService(deps: {
 
     const sameKey = await Payment.findOne({ customerId, idempotencyKey });
     if (sameKey) {
-      if (sameKey.bookingId.toString() !== booking._id.toString()) {
+      if (sameKey.bookingId?.toString() !== booking._id.toString()) {
         throw new AppError('IDEMPOTENCY_KEY_REUSED');
       }
       return view(sameKey);
     }
     const open = await Payment.findOne({
       bookingId: booking._id,
+      purpose: { $in: ['FARE', 'FEE'] },
+      method: { $ne: 'WALLET' },
       status: 'CREATED',
       expiresAt: { $gt: now() },
     });
@@ -171,9 +187,80 @@ export function createPaymentsService(deps: {
     }
   }
 
-  /** The payment is confirmed: settle the booking and record the money. Safe to run repeatedly. */
+  const markLedgerRecorded = (p: PaymentDoc) =>
+    Payment.updateOne(
+      { _id: (p as unknown as { _id: Types.ObjectId })._id, ledgerRecordedAt: { $exists: false } },
+      { ledgerRecordedAt: now() },
+    );
+
+  /** The payment is confirmed: settle what it was for and record the money. Safe to run repeatedly. */
   async function finishPaid(p: PaymentDoc): Promise<void> {
     const at = p.paidAt ?? now();
+    const customer = p.customerId.toString();
+    // Where the money came from: Razorpay's balance, or the rider's wallet.
+    const source = p.method === 'WALLET' ? Accounts.wallet(customer) : Accounts.gateway;
+
+    if (p.purpose === 'TOPUP') {
+      await ledger.post({
+        kind: 'WALLET_TOPUP',
+        idempotencyKey: `pay:${p.publicId}`,
+        entries: [
+          { account: Accounts.gateway, amountPaise: p.amountPaise },
+          { account: Accounts.wallet(customer), amountPaise: -p.amountPaise },
+        ],
+        customerId: p.customerId,
+        description: 'Wallet top-up',
+        at,
+      });
+      // A bonus for topping up (when switched on): the platform pays it, from promotions.
+      const bonus =
+        config.walletBonusBp > 0 && p.amountPaise >= config.walletBonusMinTopupPaise
+          ? Math.min(
+              Math.round((p.amountPaise * config.walletBonusBp) / 10_000),
+              config.walletBonusMaxPaise,
+            )
+          : 0;
+      if (bonus > 0) {
+        await ledger.post({
+          kind: 'WALLET_BONUS',
+          idempotencyKey: `bonus:${p.publicId}`,
+          entries: [
+            { account: Accounts.promotions, amountPaise: bonus },
+            { account: Accounts.wallet(customer), amountPaise: -bonus },
+          ],
+          customerId: p.customerId,
+          description: 'Top-up bonus',
+          at,
+        });
+      }
+      await markLedgerRecorded(p);
+      return;
+    }
+
+    if (p.purpose === 'TIP') {
+      // The driver gets the whole tip: no commission.
+      await ledger.post({
+        kind: 'TIP_PAYMENT',
+        idempotencyKey: `pay:${p.publicId}`,
+        entries: [
+          { account: source, amountPaise: p.amountPaise },
+          {
+            account: Accounts.driverPayable(p.payeeDriverId!.toString()),
+            amountPaise: -p.amountPaise,
+          },
+        ],
+        ...(p.bookingId ? { bookingId: p.bookingId } : {}),
+        ...(p.bookingPublicId ? { bookingPublicId: p.bookingPublicId } : {}),
+        driverId: p.payeeDriverId!,
+        customerId: p.customerId,
+        description: 'Tip',
+        at,
+      });
+      await markLedgerRecorded(p);
+      await paidHook?.(p);
+      return;
+    }
+
     // The booking is marked with the payment that settled it, so a re-run can tell "ours" from
     // "someone else already settled this" (cash, write-off).
     const settled = await Booking.findOneAndUpdate(
@@ -186,32 +273,34 @@ export function createPaymentsService(deps: {
     const duplicate = !ours;
 
     await ledger.post({
-      kind: 'ONLINE_PAYMENT',
+      kind: p.method === 'WALLET' ? 'WALLET_PAYMENT' : 'ONLINE_PAYMENT',
       idempotencyKey: `pay:${p.publicId}`,
       entries: [
-        { account: Accounts.gateway, amountPaise: p.amountPaise },
-        { account: Accounts.riderReceivable(p.customerId.toString()), amountPaise: -p.amountPaise },
+        { account: source, amountPaise: p.amountPaise },
+        { account: Accounts.riderReceivable(customer), amountPaise: -p.amountPaise },
       ],
-      bookingId: p.bookingId,
-      bookingPublicId: p.bookingPublicId,
+      bookingId: p.bookingId!,
+      bookingPublicId: p.bookingPublicId!,
       customerId: p.customerId,
-      description: duplicate ? 'Online payment (booking already settled)' : 'Online payment',
+      description: duplicate
+        ? 'Payment (booking already settled)'
+        : p.method === 'WALLET'
+          ? 'Paid from wallet'
+          : 'Online payment',
       at,
     });
-    await Payment.updateOne(
-      { _id: p._id, ledgerRecordedAt: { $exists: false } },
-      { ledgerRecordedAt: now() },
-    );
+    await markLedgerRecorded(p);
 
     // Paid twice (e.g. cash was taken while the rider's online payment was still in flight):
-    // the second payment goes straight back.
+    // the second payment goes straight back (to the wallet if that is where it came from).
     if (duplicate) {
       await refundInternal(
         null,
-        p._id,
+        (p as unknown as { _id: Types.ObjectId })._id,
         p.amountPaise,
         'Duplicate payment: booking was already settled',
         `auto-refund:${p.publicId}`,
+        p.method === 'WALLET' ? 'WALLET' : 'ORIGINAL',
       ).catch((err) => logger.error({ err, paymentId: p.publicId }, 'automatic refund failed'));
     }
   }
@@ -234,13 +323,16 @@ export function createPaymentsService(deps: {
       { status: 'FAILED', failureReason: reason.slice(0, 200) },
     );
     if (!failed) return;
-    await releaseBooking(payment.bookingId);
+    if (payment.bookingId && ['FARE', 'FEE'].includes(payment.purpose)) {
+      await releaseBooking(payment.bookingId);
+    }
   }
 
   /** Put a booking back to "payable" if no other payment attempt is still open for it. */
   async function releaseBooking(bookingId: Types.ObjectId) {
     const stillOpen = await Payment.exists({
       bookingId,
+      purpose: { $in: ['FARE', 'FEE'] },
       status: 'CREATED',
       expiresAt: { $gt: now() },
     });
@@ -258,6 +350,12 @@ export function createPaymentsService(deps: {
     if (!provider.verifyPaymentSignature(input)) throw new AppError('PAYMENT_SIGNATURE_INVALID');
     const done = await markPaid(payment as unknown as PaymentDoc, input.paymentId);
     return view(done);
+  }
+
+  /** The latest payment attempt made for something else (e.g. a tip), if there is one. */
+  async function viewByRef(refPublicId: string) {
+    const p = await Payment.findOne({ refPublicId }).sort({ createdAt: -1 });
+    return p ? view(p as unknown as PaymentDoc) : null;
   }
 
   async function get(actor: Actor, paymentPublicId: string) {
@@ -288,6 +386,169 @@ export function createPaymentsService(deps: {
     };
   }
 
+  /* ---------------- tips and wallet top-ups (not about a booking's fare) ---------------- */
+
+  /** Start a gateway payment for a tip or a wallet top-up. The amount was already checked by the caller. */
+  async function startAux(
+    customerId: string,
+    input: {
+      purpose: 'TIP' | 'TOPUP';
+      amountPaise: number;
+      idempotencyKey: string;
+      booking?: { _id: Types.ObjectId; publicId: string };
+      payeeDriverId?: Types.ObjectId;
+      refPublicId?: string;
+    },
+  ) {
+    const sameKey = await Payment.findOne({ customerId, idempotencyKey: input.idempotencyKey });
+    if (sameKey) return view(sameKey);
+    const id = publicId('pay');
+    let orderId: string;
+    try {
+      ({ orderId } = await provider.createOrder({
+        amountPaise: input.amountPaise,
+        receipt: id,
+        notes: {
+          purpose: input.purpose,
+          ...(input.booking ? { bookingId: input.booking.publicId } : {}),
+        },
+      }));
+    } catch (err) {
+      logger.error({ err, purpose: input.purpose }, 'could not create payment order');
+      throw new AppError('PROVIDER_ERROR', 'Could not start the payment. Please try again.');
+    }
+    try {
+      const created = await Payment.create({
+        publicId: id,
+        ...(input.booking
+          ? { bookingId: input.booking._id, bookingPublicId: input.booking.publicId }
+          : {}),
+        customerId,
+        amountPaise: input.amountPaise,
+        purpose: input.purpose,
+        providerOrderId: orderId,
+        idempotencyKey: input.idempotencyKey,
+        ...(input.payeeDriverId ? { payeeDriverId: input.payeeDriverId } : {}),
+        ...(input.refPublicId ? { refPublicId: input.refPublicId } : {}),
+        expiresAt: new Date(now().getTime() + config.paymentOrderTtlMs),
+      });
+      return view(created);
+    } catch (err) {
+      if ((err as { code?: number }).code === DUPLICATE_KEY) {
+        const raced = await Payment.findOne({ customerId, idempotencyKey: input.idempotencyKey });
+        if (raced) return view(raced);
+      }
+      throw err;
+    }
+  }
+
+  /** Pay a booking's fare or fee from the rider's wallet balance. Instant; no gateway involved. */
+  async function payBookingFromWallet(
+    customerId: string,
+    bookingPublicId: string,
+    idempotencyKey: string,
+  ) {
+    const booking = await Booking.findOne({ publicId: bookingPublicId, customerId });
+    if (!booking) throw new AppError('NOT_FOUND', 'Booking not found.');
+    const sameKey = await Payment.findOne({ customerId, idempotencyKey });
+    if (sameKey) {
+      if (sameKey.bookingId?.toString() !== booking._id.toString()) {
+        throw new AppError('IDEMPOTENCY_KEY_REUSED');
+      }
+      return view(sameKey);
+    }
+    const due = amountDue(booking);
+    if (!due) {
+      throw new AppError(
+        'CONFLICT',
+        booking.paymentStatus === 'PAID'
+          ? 'This booking is already paid.'
+          : 'There is nothing to pay on this booking.',
+      );
+    }
+    // Reserve the booking so cash, card and wallet cannot all settle it.
+    const reserved = await Booking.findOneAndUpdate(
+      { _id: booking._id, paymentStatus: { $in: ['DUE', 'FAILED'] } },
+      { paymentStatus: 'PROCESSING' },
+      { returnDocument: 'after' },
+    );
+    if (!reserved)
+      throw new AppError('CONFLICT', 'A payment for this booking is already in progress.');
+
+    const state = { charged: false };
+    try {
+      return await wallet.withLock(customerId, async () => {
+        await wallet.assertCanSpend(customerId, due.amountPaise);
+        const id = publicId('pay');
+        const at = now();
+        const doc = await Payment.create({
+          publicId: id,
+          bookingId: booking._id,
+          bookingPublicId: booking.publicId,
+          customerId,
+          amountPaise: due.amountPaise,
+          purpose: due.purpose,
+          method: 'WALLET',
+          status: 'PAID',
+          providerOrderId: `wallet_${id}`,
+          providerPaymentId: `wallet_${id}`,
+          idempotencyKey,
+          expiresAt: at,
+          paidAt: at,
+        });
+        state.charged = true;
+        await finishPaid(doc as unknown as PaymentDoc);
+        return view((await Payment.findById(doc._id)) as unknown as PaymentDoc);
+      });
+    } catch (err) {
+      // Nothing was charged: put the booking back so the rider can pay another way.
+      if (!state.charged) {
+        await Booking.updateOne(
+          { _id: booking._id, paymentStatus: 'PROCESSING' },
+          { paymentStatus: booking.paymentStatus },
+        );
+      }
+      throw err;
+    }
+  }
+
+  /** Pay a tip from the wallet balance. */
+  async function payTipFromWallet(
+    customerId: string,
+    input: {
+      amountPaise: number;
+      idempotencyKey: string;
+      booking: { _id: Types.ObjectId; publicId: string };
+      payeeDriverId: Types.ObjectId;
+      refPublicId: string;
+    },
+  ) {
+    return wallet.withLock(customerId, async () => {
+      await wallet.assertCanSpend(customerId, input.amountPaise);
+      const id = publicId('pay');
+      const at = now();
+      const doc = await Payment.create({
+        publicId: id,
+        bookingId: input.booking._id,
+        bookingPublicId: input.booking.publicId,
+        customerId,
+        amountPaise: input.amountPaise,
+        purpose: 'TIP',
+        method: 'WALLET',
+        status: 'PAID',
+        providerOrderId: `wallet_${id}`,
+        providerPaymentId: `wallet_${id}`,
+        idempotencyKey: input.idempotencyKey,
+        payeeDriverId: input.payeeDriverId,
+        refPublicId: input.refPublicId,
+        expiresAt: at,
+        paidAt: at,
+      });
+      await finishPaid(doc as unknown as PaymentDoc);
+      return view((await Payment.findById(doc._id)) as unknown as PaymentDoc);
+    });
+  }
+
   /* ---------------- refunds ---------------- */
 
   async function markRefundProcessed(refundId: Types.ObjectId): Promise<void> {
@@ -300,18 +561,23 @@ export function createPaymentsService(deps: {
     if (!refund || refund.status !== 'PROCESSED') return;
     const payment = await Payment.findById(refund.paymentId).lean();
     if (!payment) return;
-    // Platform bears the refund: money leaves the gateway, the driver's share is untouched.
+    // Platform bears the refund: the driver's share is untouched. The money either leaves the
+    // gateway, or stays with us and is credited to the rider's wallet.
+    const toWallet = refund.destination === 'WALLET';
     await ledger.post({
       kind: 'REFUND',
       idempotencyKey: `refund:${refund.publicId}`,
       entries: [
-        { account: Accounts.gateway, amountPaise: -refund.amountPaise },
+        {
+          account: toWallet ? Accounts.wallet(payment.customerId.toString()) : Accounts.gateway,
+          amountPaise: -refund.amountPaise,
+        },
         { account: Accounts.refunds, amountPaise: refund.amountPaise },
       ],
       bookingId: refund.bookingId,
-      bookingPublicId: payment.bookingPublicId,
+      bookingPublicId: payment.bookingPublicId!,
       customerId: payment.customerId,
-      description: refund.reason,
+      description: toWallet ? `Refund to wallet: ${refund.reason}` : refund.reason,
       at: refund.processedAt ?? now(),
     });
     await syncBookingAfterRefund(refund.bookingId, refund.paymentId);
@@ -366,9 +632,18 @@ export function createPaymentsService(deps: {
     amountPaise: number,
     reason: string,
     idempotencyKey: string,
+    requestedDestination: 'ORIGINAL' | 'WALLET' = 'ORIGINAL',
   ) {
     const existing = await Refund.findOne({ idempotencyKey });
     if (existing) return existing;
+
+    const original = await Payment.findById(paymentId).select('purpose method').lean();
+    if (!original) throw new AppError('NOT_FOUND', 'Payment not found.');
+    if (!['FARE', 'FEE'].includes(original.purpose)) {
+      throw new AppError('UNPROCESSABLE', 'Tips and wallet top-ups cannot be refunded here.');
+    }
+    // Money that came from the wallet can only go back to the wallet.
+    const destination = original.method === 'WALLET' ? 'WALLET' : requestedDestination;
 
     const reserved = await Payment.findOneAndUpdate(
       {
@@ -392,9 +667,10 @@ export function createPaymentsService(deps: {
       refund = await Refund.create({
         publicId: publicId('rfd'),
         paymentId,
-        bookingId: reserved.bookingId,
+        bookingId: reserved.bookingId!,
         amountPaise,
         reason,
+        destination,
         idempotencyKey,
         ...(actor ? { createdBy: actor.userId } : {}),
       });
@@ -411,26 +687,30 @@ export function createPaymentsService(deps: {
       { paymentStatus: 'REFUND_PENDING' },
     );
 
-    try {
-      const res = await provider.createRefund({
-        paymentId: reserved.providerPaymentId!,
-        amountPaise,
-        receipt: refund.publicId,
-      });
-      await Refund.updateOne({ _id: refund._id }, { providerRefundId: res.refundId });
-      if (res.status === 'processed') await markRefundProcessed(refund._id);
-      else if (res.status === 'failed') await markRefundFailed(refund._id);
-    } catch (err) {
-      logger.error({ err, refundId: refund.publicId }, 'refund request failed');
-      await markRefundFailed(refund._id);
-      throw new AppError('PROVIDER_ERROR', 'The refund could not be started. Please try again.');
-    }
+    if (destination === 'WALLET') {
+      // Nothing to ask the gateway: the money is simply credited to the wallet.
+      await markRefundProcessed(refund._id);
+    } else
+      try {
+        const res = await provider.createRefund({
+          paymentId: reserved.providerPaymentId!,
+          amountPaise,
+          receipt: refund.publicId,
+        });
+        await Refund.updateOne({ _id: refund._id }, { providerRefundId: res.refundId });
+        if (res.status === 'processed') await markRefundProcessed(refund._id);
+        else if (res.status === 'failed') await markRefundFailed(refund._id);
+      } catch (err) {
+        logger.error({ err, refundId: refund.publicId }, 'refund request failed');
+        await markRefundFailed(refund._id);
+        throw new AppError('PROVIDER_ERROR', 'The refund could not be started. Please try again.');
+      }
     if (actor) {
       await audit.record(actor, {
         action: 'finance.refund',
         targetType: 'Refund',
         targetId: refund.publicId,
-        metadata: { paymentId: reserved.publicId, amountPaise, reason },
+        metadata: { paymentId: reserved.publicId, amountPaise, reason, destination },
       });
     }
     return (await Refund.findById(refund._id))!;
@@ -441,12 +721,14 @@ export function createPaymentsService(deps: {
     amountPaise: number;
     status: string;
     reason: string;
+    destination?: string | null;
     providerRefundId?: string | null;
     createdAt: Date;
   }) => ({
     refundId: r.publicId,
     amountPaise: r.amountPaise,
     status: r.status,
+    destination: r.destination ?? 'ORIGINAL',
     reason: r.reason,
     providerRefundId: r.providerRefundId ?? null,
     createdAt: r.createdAt,
@@ -460,11 +742,16 @@ export function createPaymentsService(deps: {
   ) {
     const booking = await Booking.findOne({ publicId: bookingPublicId }).select('_id').lean();
     if (!booking) throw new AppError('NOT_FOUND', 'Booking not found.');
-    const payment = await Payment.findOne({ bookingId: booking._id, status: 'PAID' }).sort({
-      paidAt: -1,
-    });
+    const payment = await Payment.findOne({
+      bookingId: booking._id,
+      purpose: { $in: ['FARE', 'FEE'] },
+      status: 'PAID',
+    }).sort({ paidAt: -1 });
     if (!payment) {
-      throw new AppError('UNPROCESSABLE', 'This booking has no online payment to refund.');
+      throw new AppError(
+        'UNPROCESSABLE',
+        'This booking has no online or wallet payment to refund.',
+      );
     }
     const r = await refundInternal(
       actor,
@@ -472,6 +759,7 @@ export function createPaymentsService(deps: {
       input.amountPaise,
       input.reason,
       `refund-req:${idempotencyKey}`,
+      input.destination,
     );
     return refundView(r);
   }
@@ -580,7 +868,7 @@ export function createPaymentsService(deps: {
       );
       if (closed) {
         expired += 1;
-        await releaseBooking(p.bookingId);
+        if (p.bookingId && ['FARE', 'FEE'].includes(p.purpose)) await releaseBooking(p.bookingId);
       }
     }
     const cutoff = new Date(t.getTime() - config.reconcileGraceMs);
@@ -613,7 +901,15 @@ export function createPaymentsService(deps: {
     reconcile,
     devComplete,
     refundView,
+    viewByRef,
+    startAux,
+    payBookingFromWallet,
+    payTipFromWallet,
+    setPaidHook(fn: (p: PaymentDoc) => Promise<void>) {
+      paidHook = fn;
+    },
   };
 }
 
 export type PaymentsService = ReturnType<typeof createPaymentsService>;
+export type { PaymentDoc };

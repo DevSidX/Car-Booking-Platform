@@ -60,7 +60,7 @@ Cash flow adds `PAID_PENDING_RECONCILIATION` (Spec B §8.4); to be reconciled wi
 `PENDING`, `ACCEPTED`, `REJECTED`, `EXPIRED`, `WITHDRAWN`
 
 ## Ride type
-`INSTANT` (MVP). `SCHEDULED`, `RENTAL`, `OUTSTATION` later.
+`INSTANT`, `SCHEDULED` (ride booked for later; see below). `RENTAL`, `OUTSTATION` later.
 
 ## Open conflicts to resolve with the lead
 - Spec A: `SEARCHING`, `CANCELLED_BY_CUSTOMER|DRIVER|SYSTEM`. Spec B: `DISPATCHING`, single `CANCELLED`. This file follows B.
@@ -102,3 +102,52 @@ The source of truth is `backend/src/modules/bookings/stateMachine.ts`.
 - Ledger account `PROMOTIONS` (coupon discounts paid by the platform).
 - Export kinds: `rides | payments | settlements | ledger` (`.csv` suffix optional).
 - Push types added: `safety.sos`, `safety.sos_escalated` (staff), `support.update`.
+
+## Tips, wallet and payouts additions
+- Feature flag keys added: `TIPS`, `WALLET`.
+- Payment `purpose`: `FARE | FEE | TIP | TOPUP`. Payment `method`: `GATEWAY` (Razorpay) | `WALLET`. A wallet payment is `PAID` at once and has `checkout: null`. A `TOPUP` payment has `bookingId: null`.
+- Tip `status`: `PENDING | PAID | FAILED`; `source`: `ONLINE | WALLET`. One live (PENDING or PAID) tip per ride. Amount Rs 10 to Rs 2,000; within 24 hours of completion.
+- Refund `destination`: `ORIGINAL` (back through Razorpay) | `WALLET` (credited to the rider's wallet, processed at once). A ride paid from the wallet can only be refunded to the wallet. Tips and top-ups cannot be refunded here.
+- Wallet limits (placeholders): top-up Rs 50 to Rs 5,000, balance at most Rs 10,000. The wallet is closed: money out only by paying rides, fees and tips.
+- Ledger kinds added: `WALLET_TOPUP`, `WALLET_PAYMENT`, `TIP_PAYMENT`, `PAYOUT_REVERSAL`. Ledger account added: `WALLET:<customerId>` (credit, so negative = the balance we hold for the rider).
+- Driver payout account `type`: `BANK | UPI`; `status`: `PENDING | ACTIVE | REJECTED` (only ACTIVE receives money; any change goes back to PENDING).
+- Payout `status`: `CREATED | PROCESSING | PAID | FAILED | REVERSED`. One live payout per settlement; a FAILED/REVERSED one can be followed by a new attempt.
+- Push types added: `tip.received` (driver), `payout.sent` (driver).
+
+## Scheduled rides additions
+- Booking status **`SCHEDULED`**: booked for later and waiting. Transitions: `SCHEDULED -> REQUESTED` (the search starts, done by a job about 20 minutes before pickup) or `SCHEDULED -> CANCELLED` (rider, free; or the system). After `REQUESTED` it is a normal ride.
+- Booking `rideType`: `INSTANT | SCHEDULED`; `scheduledFor` is the pickup time (UTC). A quote made for later also carries `scheduledFor`.
+- Cancellation reason (system): `SCHEDULE_MISSED` (nobody started the ride within 30 minutes after its time; no charge).
+- Booking events: `SCHEDULE_ACTIVATED`, `RESCHEDULED`.
+- Push types: `booking.reminder` (about 1 hour before, only if booked earlier than that), `booking.searching` (the search has started), `booking.schedule_missed`.
+- Rules (confirmed by the owner 2026-10-18): booked between 30 minutes and 7 days ahead; at most 5 waiting per rider; the search starts 20 minutes before pickup; reminder 1 hour before; the fare is the price at booking time (frozen like any booking); free cancellation until the search starts, then the normal cancellation rules; the search continues until pickup time plus 10 minutes; two waiting rides at least 30 minutes apart; the fare is never repriced automatically.
+- Cancellation reason (staff): `STAFF` (actor `ADMIN`), with a note. Push `booking.cancelled_by_staff`.
+- A scheduled ride is searched for until its pickup time plus 10 minutes (not 60 seconds like an instant ride). Two scheduled rides of one rider must be 30 minutes apart.
+
+## Corporate accounts additions
+- Feature flag key added: `CORPORATE`.
+- Booking `paymentMethod`: `CASH | ONLINE | CORPORATE`. A CORPORATE booking also has `billedToCompany: true` and an optional `corporateReference` (the company's cost centre / project / purpose, up to 60 characters).
+- Booking `paymentStatus` added: `BILLED` (owed by the company; the rider owes nothing). A late-cancel or no-show fee on a company ride is billed to the company too.
+- Company `status`: `ACTIVE | SUSPENDED` (suspended stops new company rides at once). Membership `role`: `ADMIN | EMPLOYEE`; `status`: `INVITED | ACTIVE | REMOVED`. A person is active in one company at a time.
+- Invoice `status`: `DRAFT | ISSUED | PAID | VOID`. The number (`CI-<year>-<6 digits>`) is given on issue. `taxPaise` is 0: tax is not calculated by the system.
+- Ledger kinds added: `CORPORATE_PAYMENT`, `CORPORATE_CREDIT`. Ledger account added: `CORPORATE_RECEIVABLE:<companyId>` (what the company owes, positive).
+- Errors added: `CORPORATE_NOT_ALLOWED` (403: not a member, company not active, not an admin), `CORPORATE_LIMIT_EXCEEDED` (422: per-ride cap, employee monthly limit or company credit limit).
+- Push types added: `corporate.invited`.
+- Placeholder defaults (confirm): credit limit Rs 50,000; payment terms 15 days; Rs 10,000 per employee per month; optional per-ride cap; no coupons on company rides; monthly limits count calendar months in India time.
+
+## Staff login, privacy and storage additions
+- Staff sign in with **email + password + a 6-digit authenticator code** (`/auth/staff/...`). In production a staff phone code is refused (`STAFF_OTP_LOGIN` may not be true). Staff sessions last 12 hours (everyone else 30 days). 5 wrong passwords or codes lock the account for 15 minutes.
+- Password rules: 12 to 128 characters, not a common password, not your name or email. Recovery codes (8, shown once) replace the authenticator code once each.
+- Account deletion: `User.accountStatus` becomes `DELETED` after a 7-day waiting period; the phone number is replaced by `deleted:<id>` (so it can sign up again as a new person). Money records are kept, anonymised.
+- Audit actions added: `staff.credentials.invite`, `staff.setup.complete`, `staff.login`, `staff.login.locked`, `staff.password.reset`, `staff.password.change`, `privacy.export`, `privacy.deletion_requested`, `privacy.account_deleted`, `privacy.staff_deleted_account`.
+- Push types added: `privacy.deletion_blocked`.
+- Driver document upload: a file is acceptable if it is in storage, between 1 byte and 10 MB, and of the declared type (`image/jpeg`, `image/png`, `application/pdf`). Staff can approve a document only when its file passes this check (otherwise `409`).
+
+## Rentals, outstation and tips additions
+- `tripKind`: `CITY` (default), `RENTAL`, `OUTSTATION` (on quotes, bookings, offers).
+- Outstation `tripType`: `ONE_WAY`, `ROUND_TRIP`.
+- Tip `source`: now also `CASH`.
+- Fare `basis` on a finished ride: `RENTAL_PACKAGE_AND_USAGE`, `OUTSTATION_DISTANCE_AND_DAYS` (besides the city values).
+- Ledger kinds: `WALLET_BONUS`, `INVOICE_TAX`; account `TAX_PAYABLE`.
+- Booking event type: `ODOMETER_MISMATCH`.
+- Monitor check: `rides_overrunning`.

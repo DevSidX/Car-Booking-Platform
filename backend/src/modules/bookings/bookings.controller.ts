@@ -2,7 +2,12 @@ import type { RequestHandler } from 'express';
 import { actorFrom } from '../../common/actor';
 import { AppError } from '../../common/errors';
 import { ok } from '../../common/response';
-import { createBookingSchema, idempotencyKeySchema } from './bookings.schemas';
+import {
+  bookingListQuerySchema,
+  createBookingSchema,
+  idempotencyKeySchema,
+  rescheduleSchema,
+} from './bookings.schemas';
 import type { BookingsService } from './bookings.service';
 
 export function createBookingsController(service: BookingsService) {
@@ -31,5 +36,25 @@ export function createBookingsController(service: BookingsService) {
     ok(res, await service.events(actorFrom(req), String(req.params['bookingId'])));
   };
 
-  return { create, get, events };
+  const reschedule: RequestHandler = async (req, res) => {
+    const { scheduledFor } = rescheduleSchema.parse(req.body);
+    ok(
+      res,
+      await service.reschedule(
+        actorFrom(req).userId,
+        String(req.params['bookingId']),
+        scheduledFor,
+      ),
+    );
+  };
+
+  const list: RequestHandler = async (req, res) => {
+    const result = await service.list(
+      actorFrom(req).userId,
+      bookingListQuerySchema.parse(req.query),
+    );
+    ok(res, result.items, 200, result.meta);
+  };
+
+  return { create, get, events, reschedule, list };
 }

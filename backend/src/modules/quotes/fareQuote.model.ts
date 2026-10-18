@@ -18,8 +18,13 @@ const fareQuoteSchema = new Schema(
     customerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     zoneId: { type: Schema.Types.ObjectId, ref: 'ServiceZone', required: true },
     categoryId: { type: Schema.Types.ObjectId, ref: 'CabCategory', required: true },
-    configId: { type: Schema.Types.ObjectId, ref: 'FareConfig', required: true },
-    configVersion: { type: Number, required: true },
+    // City rides are priced from a fare config; rentals and outstation trips from their own rates.
+    configId: { type: Schema.Types.ObjectId, ref: 'FareConfig' },
+    configVersion: { type: Number, default: 0 },
+    tripKind: { type: String, enum: ['CITY', 'RENTAL', 'OUTSTATION'], default: 'CITY' },
+    // The rental package or outstation rate as it was when the rider saw the price.
+    rental: { type: Schema.Types.Mixed },
+    outstation: { type: Schema.Types.Mixed },
     pickup: { type: pointSchema, required: true },
     drop: { type: pointSchema, required: true },
     stops: { type: [pointSchema], default: [] },
@@ -39,6 +44,8 @@ const fareQuoteSchema = new Schema(
       default: undefined,
     },
     discountPaise: { type: Number, default: 0 },
+    // Set when the rider is pricing a ride for later.
+    scheduledFor: { type: Date },
     distanceMeters: { type: Number, required: true },
     durationSeconds: { type: Number, required: true },
     breakdown: { type: Schema.Types.Mixed, required: true },

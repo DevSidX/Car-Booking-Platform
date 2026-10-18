@@ -10,11 +10,17 @@ export type PaymentStatus = (typeof PaymentStatuses)[number];
 const paymentSchema = new Schema(
   {
     publicId: { type: String, required: true, unique: true },
-    bookingId: { type: Schema.Types.ObjectId, ref: 'Booking', required: true },
-    bookingPublicId: { type: String, required: true },
+    // Not set for a wallet top-up, which is not about any ride.
+    bookingId: { type: Schema.Types.ObjectId, ref: 'Booking' },
+    bookingPublicId: { type: String },
     customerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     amountPaise: { type: Number, required: true, min: 1 },
-    purpose: { type: String, enum: ['FARE', 'FEE'], required: true },
+    purpose: { type: String, enum: ['FARE', 'FEE', 'TIP', 'TOPUP'], required: true },
+    // GATEWAY = paid through Razorpay; WALLET = paid from the rider's wallet balance.
+    method: { type: String, enum: ['GATEWAY', 'WALLET'], default: 'GATEWAY' },
+    // A tip: who receives it, and which tip this payment is for.
+    payeeDriverId: { type: Schema.Types.ObjectId, ref: 'DriverProfile' },
+    refPublicId: { type: String },
     status: { type: String, enum: PaymentStatuses, default: 'CREATED' },
     providerOrderId: { type: String, required: true, unique: true },
     providerPaymentId: { type: String },

@@ -17,6 +17,7 @@ export function driversRouter(ctx: ModuleContext): Router {
   r.post('/drivers/applications', ...driverOnly, c.submitApplication);
   r.get('/drivers/me/application', ...driverOnly, c.getApplication);
   r.post('/drivers/me/documents', ...driverOnly, c.addDocument);
+  r.post('/drivers/me/documents/:documentId/uploaded', ...driverOnly, c.confirmUpload);
   r.get('/drivers/me/documents', ...driverOnly, c.listDocuments);
 
   // Admin / reviewers

@@ -199,6 +199,9 @@ export async function receiptView(viewer: Viewer, bookingRaw: unknown, rideRaw: 
         billableDurationSeconds?: number;
         waiting?: { billableSeconds: number; totalWaitSeconds: number };
         breakdown: Record<string, number>;
+        labels?: { base: string; distance?: string; time?: string };
+        details?: { base?: string; distance?: string; time?: string };
+        extraLines?: FareLine[];
       }
     | undefined;
   const completed = b.status === 'COMPLETED' && Boolean(finalFare);
@@ -210,18 +213,23 @@ export async function receiptView(viewer: Viewer, bookingRaw: unknown, rideRaw: 
     const min = Math.round((finalFare.billableDurationSeconds ?? 0) / 60);
     const waitMin = Math.round((finalFare.waiting?.billableSeconds ?? 0) / 60);
     const all: FareLine[] = [
-      { code: 'BASE', label: 'Base fare', amountPaise: bd['baseFarePaise'] ?? 0 },
+      {
+        code: 'BASE',
+        label: finalFare.labels?.base ?? 'Base fare',
+        amountPaise: bd['baseFarePaise'] ?? 0,
+        ...(finalFare.details?.base ? { detail: finalFare.details.base } : {}),
+      },
       {
         code: 'DISTANCE',
-        label: 'Distance',
+        label: finalFare.labels?.distance ?? 'Distance',
         amountPaise: bd['distanceFarePaise'] ?? 0,
-        detail: `${km} km`,
+        detail: finalFare.details?.distance ?? `${km} km`,
       },
       {
         code: 'TIME',
-        label: 'Ride time',
+        label: finalFare.labels?.time ?? 'Ride time',
         amountPaise: bd['timeFarePaise'] ?? 0,
-        detail: `${min} min`,
+        detail: finalFare.details?.time ?? `${min} min`,
       },
       {
         code: 'WAITING',
@@ -238,6 +246,8 @@ export async function receiptView(viewer: Viewer, bookingRaw: unknown, rideRaw: 
     ];
     // Show a line when it has an amount, but always the base fare.
     lines.push(...all.filter((l) => l.code === 'BASE' || l.amountPaise !== 0));
+    // Extra charges that belong to the trip (e.g. an outstation driver's night allowance).
+    lines.push(...(finalFare.extraLines ?? []));
     // A coupon lowers what the rider pays (the driver is still paid on the full fare).
     const discount = (finalFare as { discountPaise?: number }).discountPaise ?? 0;
     if (discount > 0) {

@@ -26,6 +26,10 @@ export function createDriversController(service: DriversService) {
     ok(res, await service.addDocument(actorFrom(req).userId, input), 201);
   };
 
+  const confirmUpload: RequestHandler = async (req, res) => {
+    ok(res, await service.confirmUpload(actorFrom(req).userId, String(req.params['documentId'])));
+  };
+
   const listDocuments: RequestHandler = async (req, res) => {
     ok(res, await service.listDocuments(actorFrom(req).userId));
   };
@@ -57,6 +61,7 @@ export function createDriversController(service: DriversService) {
     submitApplication,
     getApplication,
     addDocument,
+    confirmUpload,
     listDocuments,
     list,
     detail,

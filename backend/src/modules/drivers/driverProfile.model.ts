@@ -31,6 +31,9 @@ const driverProfileSchema = new Schema(
     // Running totals of the stars riders gave, so the average is cheap to show.
     ratingCount: { type: Number, default: 0 },
     ratingSum: { type: Number, default: 0 },
+    // Which long trips this driver is willing to be offered. Rentals are on by default; outstation is opt-in.
+    acceptsRentals: { type: Boolean, default: true },
+    acceptsOutstation: { type: Boolean, default: false },
     applicationSubmittedAt: { type: Date },
     reviewedAt: { type: Date },
     reviewedBy: { type: Schema.Types.ObjectId, ref: 'User' },

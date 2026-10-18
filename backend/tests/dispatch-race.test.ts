@@ -104,14 +104,30 @@ describe('one driver, two rides', () => {
     const d = await createDriver(env, world, { at: NEAR_CP });
     const c2 = await loginAs(env, nextPhone(), 'CUSTOMER');
     await requestRide(env, world, customer);
-    await requestRide(env, world, c2);
+    const second = await requestRide(env, world, c2);
+    // Dispatch no longer offers a busy-with-an-offer driver a second ride, but a race between two
+    // searches still can; simulate that, because the driver must never end up with both rides.
+    const secondBooking = (await Booking.findOne({ publicId: second.bookingId }))!;
+    await RideOffer.create({
+      publicId: 'ofr_0a0a0a0a0a02',
+      bookingId: secondBooking._id,
+      driverId: d.driverId,
+      vehicleId: d.vehicleId,
+      round: 1,
+      status: 'PENDING',
+      expiresAt: new Date(Date.now() + 20_000),
+      rank: 1,
+    });
     const offers = (await api().get('/api/v1/drivers/me/offers').set(d.auth)).body.data as {
       offerId: string;
     }[];
     expect(offers).toHaveLength(2);
 
     const results = await Promise.all(offers.map((o) => acceptOffer(env, d, o.offerId)));
-    expect(results.map((r) => r.status).sort()).toEqual([200, 403]);
+    // One wins. The other is refused: either the winner already closed it (409) or the driver is busy (403).
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses[0]).toBe(200);
+    expect([403, 409]).toContain(statuses[1]);
     expect(await Ride.countDocuments()).toBe(1);
     expect(await Booking.countDocuments({ status: 'DRIVER_ASSIGNED' })).toBe(1);
     expect(await Booking.countDocuments({ status: 'DISPATCHING' })).toBe(1);

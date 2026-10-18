@@ -74,7 +74,7 @@ export function createNotifier(deps: {
       await safe('booking change', async () => {
         const b = await Booking.findById(bookingId)
           .select(
-            'publicId customerId assignedDriverId rideId paymentMethod finalFarePaise estimatedFarePaise cancellation fee',
+            'publicId customerId assignedDriverId rideId paymentMethod finalFarePaise estimatedFarePaise cancellation fee rideType scheduledFor',
           )
           .lean();
         if (!b) return;
@@ -147,7 +147,16 @@ export function createNotifier(deps: {
             }
             break;
           case 'NO_DRIVER_FOUND':
-            toRider('booking.no_driver', 'No drivers available', 'Please try again in a moment.');
+            if (b.rideType === 'SCHEDULED' && b.scheduledFor) {
+              // The pickup time has passed or is here: "try again in a moment" would be wrong.
+              toRider(
+                'booking.no_driver',
+                'We could not find a driver',
+                `We could not find a driver for your ride scheduled for ${new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(b.scheduledFor)}. You were not charged. Please book again.`,
+              );
+            } else {
+              toRider('booking.no_driver', 'No drivers available', 'Please try again in a moment.');
+            }
             break;
           case 'CANCELLED': {
             const by = b.cancellation?.actor;

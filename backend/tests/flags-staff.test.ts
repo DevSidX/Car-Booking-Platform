@@ -33,6 +33,9 @@ describe('feature flags', () => {
       SUPPORT_TICKETS: true,
       RATINGS: true,
       COUPONS: true,
+      TIPS: true,
+      WALLET: true,
+      CORPORATE: true,
     });
     expect((await api().get('/api/v1/config/flags')).status).toBe(401);
   });

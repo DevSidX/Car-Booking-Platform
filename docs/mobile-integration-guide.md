@@ -154,3 +154,60 @@ All money is in paise. The server decides every amount; the apps never send one 
 **Rider: coupon** (`COUPONS`): add an optional code box next to the price. Send `couponCode` with `POST /fare-quotes`; show `estimatedPayablePaise` (the price after the coupon) and show the `fieldErrors[0].message` if the code is refused. The receipt has a `DISCOUNT` line, and `finalFarePaise` is what the rider pays. The driver is paid on the full fare.
 
 **Admin panel screens needed (API ready, no screens yet):** feature flags; staff list/create/change role (super admin); safety desk (open alerts, acknowledge, notes, live location, resolve; subscribe to `ops:sos`); support queue (filters, assign, reply, internal note, resolve); low-rating review and hide; reports summary and CSV downloads; coupons (create, list, switch off). Show nothing a role may not call: the allowed roles are in the OpenAPI document.
+
+## 11. Tips, wallet, payouts (added after Phase 8)
+
+**Rider: tip** (`TIPS`): after the ride is `COMPLETED`, show "Add a tip" (within 24 hours). `POST /rides/{rideId}/tip` `{ amountPaise 1000-200000, source: "ONLINE" | "WALLET" }` with an `Idempotency-Key`. ONLINE returns `payment.checkout`: open the Razorpay checkout, then `POST /payments/verify` (same as a ride payment). WALLET is instant. `GET /rides/{rideId}/tip` shows whether one exists. One tip per ride; the driver gets all of it and is told by push.
+
+**Rider: wallet** (`WALLET`): `GET /wallet` for the balance, the limits and the latest entries. "Add money": `POST /wallet/topups` `{ amountPaise }` then the normal checkout; the balance updates when the payment is confirmed (refresh after verify). On a ride that is due, offer "Pay from wallet": `POST /bookings/{id}/pay-from-wallet`; on `402 INSUFFICIENT_WALLET_BALANCE` offer top-up or card. Refunds may arrive as wallet credit (`destination: WALLET`): they appear in `entries`. The wallet cannot be withdrawn to a bank.
+
+**Driver: payout account**: `GET/PUT /drivers/me/payout-account`. Bank (`accountNumber` 9-18 digits, `ifsc`) or UPI (`vpa`). Show the status: `PENDING` ("being checked"), `ACTIVE`, `REJECTED` (show `rejectionReason`). Changing the account restarts the check, so warn the driver before they edit it. The full number is never shown again (only the last digits). Payout results arrive as push `payout.sent`; the driver's `GET /drivers/me/settlements` shows each payout's reference once PAID. `GET /drivers/me/earnings` now has `totals.tipsPaise` and `totals.tipCount`.
+
+**Admin panel screens needed:** payout accounts to review (verify the holder name matches the driver), a "Pay" button on approved settlements and the payout history (`/admin/payouts`), a rider's wallet view for support (`/admin/wallets/{customerId}`), refund with a destination choice.
+
+## 12. Scheduled rides (added after Phase 8)
+
+**Rider app**
+1. A "Schedule" option beside "Ride now": choose a pickup date and time (between 30 minutes and 7 days ahead; show the allowed range, and the service hours if the zone has them).
+2. Price it: `POST /fare-quotes` with `scheduledFor` (ISO, UTC). Show the fare as an estimate for that time.
+3. Book it: `POST /bookings` with `rideType: "SCHEDULED"` and the same `scheduledFor`, plus the usual `Idempotency-Key`. The booking comes back `SCHEDULED`.
+4. A "Scheduled rides" list: `GET /bookings?status=SCHEDULED` (soonest first, paged). The same `GET /bookings` without a status is the rider's booking history, newest first. Actions: cancel (free, `POST /bookings/{id}/cancel`), change time (`PATCH /bookings/{id}/schedule`). Two scheduled rides must be at least 30 minutes apart (`422` on `scheduledFor` otherwise).
+5. Pushes: `booking.reminder` (about an hour before), `booking.searching` (we are finding your driver), `booking.schedule_missed` (nobody could be arranged; you were not charged). After the search starts the ride behaves like a normal ride (`booking:status` events, driver card, pickup OTP...).
+6. Errors to handle: `422 scheduledFor` (too soon/too far), `NOT_SERVICEABLE` (closed at that time), `QUOTE_MISMATCH` (quote was for a different time: re-quote), `422` "at most 5 scheduled rides".
+
+**Driver app:** an offer may carry `scheduledFor` (the pickup time); show "Pickup at 9:30 AM" instead of "now". The driver goes to the pickup now: offers for a scheduled ride arrive only about 20 minutes before pickup, and the search for a driver continues until pickup time (plus 10 minutes) instead of giving up after a minute.
+
+**Admin panel:** filter bookings by `SCHEDULED`; on a waiting ride, support can cancel it for the rider (`POST /admin/bookings/{id}/scheduled/cancel`, reason required) and operations can start the search early (`POST /admin/bookings/{id}/scheduled/start-now`); the dashboard counts them as active. Analytics screens: demand heatmap (`/admin/analytics/demand`), fulfilment by hour, cancellations, drivers, retention, revenue (finance only).
+
+## 13. Corporate accounts (added after scheduled rides)
+
+**Rider app**
+1. At start-up (and after login) call `GET /corporate/me`. If `current` is set, show a "Company" payment option with the remaining monthly allowance (`remainingThisMonthPaise`). If `invitations` is not empty, show "You were invited to <company>" with an Accept button (`POST /corporate/invitations/{id}/accept`). Hide the option when the `CORPORATE` flag is off or the rider has no company.
+2. Book with `paymentMethod: "CORPORATE"` and, if the company wants it, a reference (cost centre / project) in `corporateReference`. No payment screen afterwards: the booking is `BILLED` to the company. Coupons cannot be combined.
+3. Errors: `CORPORATE_NOT_ALLOWED` (hide the option, offer cash/online), `CORPORATE_LIMIT_EXCEEDED` (show the message: it says whether it is the per-ride cap, the rider's monthly limit or the company's credit limit; offer another payment method).
+4. "Leave company": `POST /corporate/me/leave`.
+
+**Company admin screens (in the same rider app, shown only when `membership.role` is ADMIN)**
+- Employees: `GET /corporate/employees` (with what each used this month), invite by phone (`POST /corporate/employees`), change a limit or role, remove (`PATCH /corporate/employees/{id}`).
+- Rides: `GET /corporate/rides` (filter by dates). Invoices: `GET /corporate/invoices`, `GET /corporate/invoices/{id}` (issued and paid only).
+
+**Admin panel:** companies list and detail (credit used, owed, unbilled rides, available credit), create and edit limits / suspend (finance); an invoices screen: generate for a period, review the draft lines, issue, record bank payments, void; a credit action on a ride; an overdue-invoices list (`/admin/corporate-invoices?overdue=true`).
+
+## 14. Staff login, privacy and uploads (added later)
+
+**Admin panel sign-in (replaces the phone code for staff):** email + password, then the authenticator code. First time: open the emailed link -> choose a password -> scan the QR (`totp.otpauthUri`) with an authenticator app -> enter the first code -> show the 8 recovery codes once and make the person confirm they saved them. Show a lockout message from the `429`. Offer "Forgot password" and, for a lost phone, tell the person to ask a super admin to reset them. A staff session ends after 12 hours: send the person to sign in again when refresh fails.
+
+**Rider and driver apps**
+- **Settings > Privacy:** "Download my data" (`GET /me/data-export`, save the JSON) and "Delete my account" (`GET /me/deletion` first: if `blockers` is not empty, show them and stop; otherwise explain the 7 days and what is kept, then `POST /me/deletion` with `confirm: true`). While `requested` is true show "Your account will be deleted on <date>" with a Cancel button (`DELETE /me/deletion`).
+- **Driver documents:** after `POST /drivers/me/documents`, PUT the file to `upload.url` with the same `Content-Type`, then call `POST /drivers/me/documents/{id}/uploaded`; show the `422` message if the file is rejected so the driver can pick another.
+
+## Rentals, outstation, cash tips, wallet bonus
+**Rider app**
+- Add a Rental tab: call `GET /rental-packages` for the pickup, show each package (hours, km, price, extra rates), then `POST /fare-quotes` with `rentalPackageId` and no drop. Say clearly that time or distance beyond the package is charged, and tolls and parking are paid on actuals.
+- Add an Outstation tab: `GET /outstation/options`, choose one way or round trip (a round trip needs a return date and time), then `POST /fare-quotes` with `outstation`. Show the price as an estimate: a round trip is charged on actual km (with a minimum per day) and the days used.
+- Receipts for these trips come from the server; render the lines as given.
+- Tip screen: an "I tipped in cash" option (`source: CASH`). Wallet top-up screen: show the bonus when the server returns one.
+
+**Driver app**
+- Settings: toggles for Accept rentals and Accept outstation (`/drivers/me/preferences`). Outstation is off until the driver turns it on.
+- Offers carry `tripKind`, `rental`, `outstation`: show the package, or the distance and days, before the driver accepts. The app must keep sending location during the trip: the fare is based on the server recorded trail.

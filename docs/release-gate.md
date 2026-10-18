@@ -38,6 +38,9 @@ Mark each line YES with a date and a name. Any NO on a **MUST** line = no launch
 - [ ] MUST: the webhook address is set in Razorpay and one real delivery was received
 - [ ] MUST: policy numbers decided and entered (commission, unpaid grace, cash limit, who bears refunds and write-offs, coupon budget)
 - [ ] GST / tax treatment decided with an accountant
+- [ ] MUST (if the wallet is on): a lawyer/accountant has confirmed the wallet is allowed as designed (closed wallet, no bank withdrawal)
+- [ ] MUST (if payouts are on): RazorpayX account active and funded; one real small payout to an account you control, seen as PAID with a bank reference; one failed payout (wrong account) seen as FAILED and retried
+- [ ] MUST: the payout webhook (`/api/v1/webhooks/razorpayx`) is set and one real delivery was received
 
 **Safety and people**
 - [ ] MUST: a named, staffed safety desk (who answers `ops:sos`, hours, phone numbers, police/ambulance procedure) before SOS is switched on
@@ -53,3 +56,10 @@ Mark each line YES with a date and a name. Any NO on a **MUST** line = no launch
 
 ## 3. Pilot limits (recommended)
 One city, a small group of known drivers, daytime hours first, a named person watching `GET /admin/system/health` and the alert channel, and a daily look at the money consistency report (`GET /admin/finance/consistency`).
+
+## Added in the backend completion pass
+- [ ] Rentals and outstation: staff have created packages and rates for the pilot zone; the placeholder numbers in D119 to D122 are confirmed.
+- [ ] One real rental and one real outstation test ride on staging (GPS trail recorded, receipt reads correctly).
+- [ ] Invoice tax rate and seller details confirmed by an accountant (D117).
+- [ ] Redis tested with two instances (D123), or the single-instance decision recorded.
+- [ ] SMTP, S3/R2, RazorpayX, NimbusIT and Firebase each tested once live.

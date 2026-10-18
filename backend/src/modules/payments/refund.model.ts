@@ -10,6 +10,8 @@ const refundSchema = new Schema(
     amountPaise: { type: Number, required: true, min: 1 },
     reason: { type: String, required: true, maxlength: 300 },
     status: { type: String, enum: RefundStatuses, default: 'REQUESTED' },
+    // ORIGINAL = back through the payment gateway; WALLET = credited to the rider's wallet.
+    destination: { type: String, enum: ['ORIGINAL', 'WALLET'], default: 'ORIGINAL' },
     providerRefundId: { type: String },
     // Asking twice with the same key returns the same refund.
     idempotencyKey: { type: String, required: true, unique: true },

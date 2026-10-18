@@ -7,6 +7,10 @@ const driverDocumentSchema = new Schema(
     type: { type: String, enum: DocumentTypes, required: true },
     // Server-generated key in private object storage. Files are never stored in MongoDB.
     objectKey: { type: String, required: true },
+    // What the driver said the file is (and the phone must send exactly this when uploading).
+    contentType: { type: String, maxlength: 60 },
+    // Set when the server saw the file in storage with an acceptable size and type.
+    uploadVerifiedAt: { type: Date },
     // Only the last 4 characters of any document number are kept.
     documentNumberLast4: { type: String, maxlength: 4 },
     status: { type: String, enum: DocumentStatuses, default: 'PENDING' },

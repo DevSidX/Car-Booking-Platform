@@ -60,7 +60,11 @@ describe('who may call what', () => {
         )[r.method]!(fill(r.path))
           .set(sessions.get(role)!.auth)
           .send(r.method === 'get' || r.method === 'delete' ? undefined : {});
-        const denied = res.status === 403 || res.status === 401;
+        // A rider-role route may refine access by membership (a company admin): that refusal is
+        // CORPORATE_NOT_ALLOWED, not a role failure.
+        const membershipCheck =
+          res.status === 403 && res.body?.error?.code === 'CORPORATE_NOT_ALLOWED';
+        const denied = (res.status === 403 || res.status === 401) && !membershipCheck;
         if (allowed && denied) {
           wrong.push(
             `${role} should reach ${r.method.toUpperCase()} ${r.path} but got ${res.status} ${res.body?.error?.code ?? ''}`,

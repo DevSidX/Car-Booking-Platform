@@ -32,6 +32,8 @@ const settlementSchema = new Schema(
     open: { type: Boolean, default: true },
     netRecordedAt: { type: Date },
     payoutRecordedAt: { type: Date },
+    // The bank sent a paid-out amount back (a payout reversal); finance must follow it up.
+    payoutReversedAt: { type: Date },
   },
   { timestamps: true },
 );
