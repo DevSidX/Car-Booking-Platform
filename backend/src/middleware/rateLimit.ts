@@ -11,3 +11,15 @@ export function globalRateLimiter(max = 300, windowMs = 60_000) {
     handler: (_req, _res, next) => next(new AppError('RATE_LIMITED')),
   });
 }
+
+/** Per-user limiter for authenticated write endpoints (quotes, bookings). Mount after authenticate. */
+export function userRateLimiter(max = 30, windowMs = 60_000) {
+  return rateLimit({
+    windowMs,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.auth?.userId ?? 'anonymous',
+    handler: (_req, _res, next) => next(new AppError('RATE_LIMITED')),
+  });
+}

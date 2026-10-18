@@ -31,5 +31,9 @@ npm install
 npm run dev              # http://localhost:4000/api/v1/health/ready
 ```
 
-Scripts: `npm run lint | typecheck | build | test | format:check`.
+Scripts: `npm run lint | typecheck | build | test | format:check | seed | postman`.
+`npm test` needs no external database (it uses an in-memory MongoDB; the first run downloads a MongoDB binary).
+`npm run seed` creates the default cab categories and, if `SEED_ADMIN_PHONE` is set, the first SUPER_ADMIN.
+`npm run postman` regenerates `postman/` from `backend/src/docs/routes.ts`.
+In development the OTP is printed in the server log as `devOtpCode` (no SMS provider needed).
 OpenAPI spec: `GET /api/v1/openapi.json`.

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { LatLng, Providers } from './types';
+import { InvalidPushTokenError, type LatLng, type Providers, type PushPayload } from './types';
 
 /**
  * Deterministic in-process fakes for local development and tests ONLY.
@@ -17,7 +17,17 @@ function haversineMeters(a: LatLng, b: LatLng): number {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-export function createMockProviders(): Providers {
+export type MockOptions = {
+  onOtp?: (phone: string, otp: string) => void;
+  /** Called for every text message the mock "sends" (emergency alerts). */
+  onText?: (phone: string, message: string) => void;
+  /** Called for every push the mock "delivers". */
+  onPush?: (token: string, payload: PushPayload) => void;
+  /** Lets a test make a token fail: 'invalid' = dead token, 'error' = temporary outage. */
+  pushFailure?: (token: string) => 'invalid' | 'error' | undefined;
+};
+
+export function createMockProviders(options: MockOptions = {}): Providers {
   const orders = new Set<string>();
   return {
     maps: {
@@ -34,16 +44,26 @@ export function createMockProviders(): Providers {
       },
     },
     sms: {
-      async sendOtp() {
+      async sendOtp(phone, otp) {
+        options.onOtp?.(phone, otp);
+        return { providerMessageId: `mock_sms_${randomUUID()}` };
+      },
+      async sendText(phone, message) {
+        options.onText?.(phone, message);
         return { providerMessageId: `mock_sms_${randomUUID()}` };
       },
     },
     push: {
-      async send() {
+      async send(token, payload) {
+        const failure = options.pushFailure?.(token);
+        if (failure === 'invalid') throw new InvalidPushTokenError();
+        if (failure === 'error') throw new Error('mock push outage');
+        options.onPush?.(token, payload);
         return { providerMessageId: `mock_push_${randomUUID()}` };
       },
     },
     payments: {
+      checkoutKey: 'mock_checkout_key',
       async createOrder() {
         const orderId = `mock_order_${randomUUID()}`;
         orders.add(orderId);
@@ -51,6 +71,9 @@ export function createMockProviders(): Providers {
       },
       verifyPaymentSignature: () => false,
       verifyWebhookSignature: () => false,
+      async createRefund() {
+        return { refundId: `mock_refund_${randomUUID()}`, status: 'pending' as const };
+      },
     },
     storage: {
       async createUploadUrl(objectKey) {

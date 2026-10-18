@@ -16,5 +16,5 @@
     "resolveJsonModule": true,
     "sourceMap": true
   },
-  "include": ["src", "tests", "*.config.mts"]
+  "include": ["src", "tests", "scripts", "*.config.mts"]
 }

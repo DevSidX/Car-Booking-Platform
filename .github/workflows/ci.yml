@@ -24,3 +24,17 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the production image
+        run: docker build -t cab-backend:ci backend
+      - name: Image boots and refuses an unsafe config
+        # NODE_ENV=production with mock providers must fail fast; proves the image starts our code.
+        run: |
+          set +e
+          out=$(docker run --rm -e NODE_ENV=production -e PROVIDER_MODE=mock             -e MONGODB_URI=mongodb://x -e REDIS_URL=redis://x             -e JWT_ACCESS_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa             -e JWT_REFRESH_SECRET=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cab-backend:ci 2>&1)
+          echo "$out"
+          echo "$out" | grep -q "mock providers are not allowed in production"
