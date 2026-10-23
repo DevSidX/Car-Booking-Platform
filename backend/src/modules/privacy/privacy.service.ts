@@ -9,6 +9,7 @@ import { Session } from '../auth/session.model';
 import { Booking } from '../bookings/booking.model';
 import { Membership } from '../corporate/corporate.models';
 import { CustomerProfile } from '../customers/customerProfile.model';
+import { SavedPlace, savedPlaceView } from '../customers/savedPlace.model';
 import { DriverDocument } from '../drivers/driverDocument.model';
 import { DriverProfile } from '../drivers/driverProfile.model';
 import { Accounts } from '../ledger/accounts';
@@ -129,6 +130,7 @@ export function createPrivacyService(deps: {
         { revokedAt: at },
       ),
       Wallet.deleteMany({ customerId: userId }),
+      SavedPlace.deleteMany({ customerId: userId }),
       CustomerProfile.updateOne({ userId }, { $unset: { email: 1 } }),
       // Names and numbers typed into old bookings; addresses and fares stay with the money record.
       Booking.updateMany(
@@ -211,6 +213,7 @@ export function createPrivacyService(deps: {
         devices,
         memberships,
         wallet,
+        savedPlaces,
       ] = await Promise.all([
         CustomerProfile.findOne({ userId }).lean(),
         DriverProfile.findOne({ userId }).lean(),
@@ -229,6 +232,7 @@ export function createPrivacyService(deps: {
         Device.find({ userId }).select('platform appVersion createdAt').lean(),
         Membership.find({ userId }).lean(),
         ledger.balances([Accounts.wallet(userId)]),
+        SavedPlace.find({ customerId: userId }).lean(),
       ]);
       const driver = driverProfile
         ? {
@@ -320,6 +324,7 @@ export function createPrivacyService(deps: {
         })),
         devices: devices.map((d) => ({ platform: d.platform, appVersion: d.appVersion ?? null })),
         companyMemberships: memberships.map((m) => ({ role: m.role, status: m.status })),
+        savedPlaces: savedPlaces.map(savedPlaceView),
         note: 'Money records (fares, payments, invoices) are kept by law even if you delete your account.',
       };
     },

@@ -211,3 +211,46 @@ All money is in paise. The server decides every amount; the apps never send one 
 **Driver app**
 - Settings: toggles for Accept rentals and Accept outstation (`/drivers/me/preferences`). Outstation is off until the driver turns it on.
 - Offers carry `tripKind`, `rental`, `outstation`: show the package, or the distance and days, before the driver accepts. The app must keep sending location during the trip: the fare is based on the server recorded trail.
+## 7. Customer Saved Places, Referrals & Operations (DEV 2 Additions)
+
+### Customer Saved Places (CRUD)
+Riders can manage frequently visited locations for fast booking:
+- `GET /api/v1/customers/me/places`: List saved places (ordered newest first, up to 20).
+- `POST /api/v1/customers/me/places`: Create a saved place. Body:
+  ```json
+  {
+    "name": "Home",
+    "type": "home",
+    "address": "B-12 Connaught Place, New Delhi",
+    "lat": 28.6315,
+    "lng": 77.2167
+  }
+  ```
+  Allowed types: `home`, `work`, `other`. Maximum 20 saved places per account.
+- `PATCH /api/v1/customers/me/places/{placeId}`: Update address, name, or coordinates.
+- `DELETE /api/v1/customers/me/places/{placeId}`: Delete a saved place.
+Foreign place IDs return 404 (ownership strictly enforced). Integrated with GDPR account deletion/export.
+
+### Customer Referrals
+- `GET /api/v1/customers/me/referrals`: Returns unique referral code (`REF-XXXXXX`), shareable link, referral stats, and reward history.
+- `POST /api/v1/customers/me/referrals/claim`: Apply a friend's referral code. Body:
+  ```json
+  { "code": "REF-ABC123" }
+  ```
+  Returns issued coupon reward details. Self-referrals rejected with 422; duplicate claims rejected with 409; max cap of 10 referrals per user enforced. Disabled if `REFERRALS` flag is false (403 `FEATURE_DISABLED`).
+
+### Handling Booking Restrictions
+When a rider's booking ability has been restricted by staff for policy violations, `POST /api/v1/bookings` returns 403 `BOOKING_RESTRICTED` with the restriction reason in `error.message`. The customer app should display this message and prompt the rider to contact support. The rider can still browse places, view history, and access their wallet.
+
+### Admin Operations Endpoints (Admin Panel)
+- `GET /api/v1/admin/drivers/live`: Live fleet map feed. Supports query params: `minLat`, `maxLat`, `minLng`, `maxLng` (span <= 5 degrees) or `zoneId`. Returns driver profile, GeoJSON location, heading, active ride ID, and verified vehicle details. Audited.
+- `GET /api/v1/admin/dispatch/queue`: Real-time queue of unassigned bookings (`REQUESTED` and `DISPATCHING`) ordered oldest first with server-calculated `waitingSeconds`. Supports filtering by `zoneId` and `categoryId`.
+- `POST /api/v1/admin/bookings/{bookingId}/assign-driver`: Manually assign or reassign an eligible driver to a booking with atomic locking. Body:
+  ```json
+  {
+    "driverId": "507f1f77bcf86cd799439011",
+    "reason": "VIP customer request / long dispatch wait rescue"
+  }
+  ```
+- `POST /api/v1/admin/customers/{customerId}/restrictions`: Restrict or lift booking restrictions. Body: `{ "action": "RESTRICT" | "LIFT", "reason": "Non-empty explanation" }`.
+- `POST /api/v1/admin/notifications/test`: Send an audited test push or SMS notification. Body: `{ "channel": "push" | "sms", "recipientId": "<userId>", "title": "Test", "body": "Message" }`. Rate limited to 10/min.

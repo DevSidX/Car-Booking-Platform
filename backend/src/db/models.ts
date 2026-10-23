@@ -6,6 +6,8 @@ import { Booking } from '../modules/bookings/booking.model';
 import { BookingEvent } from '../modules/bookings/bookingEvent.model';
 import { CabCategory } from '../modules/categories/cabCategory.model';
 import { CustomerProfile } from '../modules/customers/customerProfile.model';
+import { SavedPlace } from '../modules/customers/savedPlace.model';
+import { ReferralClaim, ReferralProfile } from '../modules/referrals/referral.model';
 import { RideOffer } from '../modules/dispatch/rideOffer.model';
 import { DriverDocument } from '../modules/drivers/driverDocument.model';
 import { DriverProfile } from '../modules/drivers/driverProfile.model';
@@ -55,6 +57,9 @@ export const allModels: Model<any>[] = [
   BookingEvent,
   CabCategory,
   CustomerProfile,
+  SavedPlace,
+  ReferralProfile,
+  ReferralClaim,
   RideOffer,
   DriverDocument,
   DriverProfile,

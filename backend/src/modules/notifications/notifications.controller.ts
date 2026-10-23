@@ -6,6 +6,7 @@ import {
   markReadSchema,
   notificationListQuerySchema,
   registerDeviceSchema,
+  testNotificationSchema,
 } from './notifications.schemas';
 import type { NotificationsService } from './notifications.service';
 
@@ -30,5 +31,10 @@ export function createNotificationsController(service: NotificationsService) {
     ok(res, await service.markRead(actorFrom(req).userId, markReadSchema.parse(req.body)));
   };
 
-  return { registerDevice, removeDevice, list, markRead };
+  const sendTest: RequestHandler = async (req, res) => {
+    const input = testNotificationSchema.parse(req.body);
+    ok(res, await service.sendTestNotification(actorFrom(req), input));
+  };
+
+  return { registerDevice, removeDevice, list, markRead, sendTest };
 }

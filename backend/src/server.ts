@@ -13,6 +13,9 @@ import type { DocumentExpiryService } from './modules/drivers/documentExpiry.ser
 import type { NotificationsService } from './modules/notifications/notifications.service';
 import type { PresenceService } from './modules/presence/presence.service';
 import { createSocketBus } from './realtime/socketServer';
+import dns from "node:dns";
+
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
 async function main(): Promise<void> {
   const env = loadEnv();

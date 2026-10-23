@@ -12,5 +12,10 @@ export function customersRouter(ctx: ModuleContext): Router {
   r.get('/customers/me', ...customerOnly, c.getMe);
   r.patch('/customers/me', ...customerOnly, c.updateMe);
 
+  r.get('/customers/me/places', ...customerOnly, c.listPlaces);
+  r.post('/customers/me/places', ...customerOnly, c.createPlace);
+  r.patch('/customers/me/places/:placeId', ...customerOnly, c.updatePlace);
+  r.delete('/customers/me/places/:placeId', ...customerOnly, c.deletePlace);
+
   return r;
 }

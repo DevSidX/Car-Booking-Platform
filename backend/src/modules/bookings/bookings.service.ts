@@ -13,6 +13,7 @@ import type { BalancesService } from '../balances/balances.service';
 import type { CommissionService } from '../ledger/commission.service';
 import type { CancellationPolicyService } from '../pricing/cancellationPolicy.service';
 import type { QuotesService } from '../quotes/quotes.service';
+import { CustomerProfile } from '../customers/customerProfile.model';
 import { Ride } from '../rides/ride.model';
 import { driverCard } from '../rides/rides.views';
 import { Booking } from './booking.model';
@@ -168,7 +169,18 @@ export function createBookingsService(deps: {
     async create(customerId: string, idempotencyKey: string, input: CreateBookingInput) {
       // A rider with an old unpaid ride pays it first. (A retry of an existing booking still replays.)
       const alreadyBooked = await Booking.exists({ customerId, idempotencyKey });
-      if (!alreadyBooked) await balances.assertCanBook(customerId);
+      if (!alreadyBooked) {
+        await balances.assertCanBook(customerId);
+        const customerProfile = await CustomerProfile.findOne({ userId: customerId })
+          .select('bookingRestricted bookingRestrictionReason')
+          .lean();
+        if (customerProfile?.bookingRestricted) {
+          throw new AppError(
+            'BOOKING_RESTRICTED',
+            customerProfile.bookingRestrictionReason || 'Your account is restricted from creating bookings.',
+          );
+        }
+      }
       let contactPhone: string | undefined;
       if (input.pickup?.contactPhone) {
         const normalized = normalizePhone(input.pickup.contactPhone);

@@ -15,6 +15,7 @@ export const FLAG_KEYS = [
   'TIPS',
   'WALLET',
   'CORPORATE',
+  'REFERRALS',
 ] as const;
 export type FlagKey = (typeof FLAG_KEYS)[number];
 export type FlagDefaults = Record<FlagKey, boolean>;

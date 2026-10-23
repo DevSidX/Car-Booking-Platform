@@ -6,7 +6,8 @@ import { AppError } from '../../common/errors';
 import { fromPoint } from '../../common/geo';
 import { publicId } from '../../common/ids';
 import type { MapsProvider } from '../../providers';
-import { Booking } from '../bookings/booking.model';
+import { Booking, type BookingStatus } from '../bookings/booking.model';
+import type { ManualAssignDriverInput } from '../admin/admin.schemas';
 import { recordEvent, transitionBooking } from '../bookings/transitions';
 import type { Notifier } from '../../realtime/notifier';
 import type { OfferClosedReason } from '../../realtime/events';
@@ -297,11 +298,11 @@ export function createDispatchService(deps: {
    * A driver who has taken a ride can take no other: close their remaining offers at once, so those
    * riders are offered to someone else now instead of after the offer window runs out.
    */
-  async function withdrawDriverOffers(driverId: Types.ObjectId, exceptOfferId: Types.ObjectId) {
+  async function withdrawDriverOffers(driverId: Types.ObjectId, exceptOfferId?: Types.ObjectId) {
     const open = await RideOffer.find({
       driverId,
       status: 'PENDING',
-      _id: { $ne: exceptOfferId },
+      ...(exceptOfferId ? { _id: { $ne: exceptOfferId } } : {}),
     })
       .select('_id publicId driverId')
       .lean();
@@ -785,6 +786,192 @@ export function createDispatchService(deps: {
         rideId: ride.publicId,
         status: 'DRIVER_ASSIGNED' as const,
         pickupEtaSeconds: offer.pickupEtaSeconds ?? null,
+      };
+    },
+
+    /**
+     * Admin manual driver assignment or reassignment (audited, concurrency-safe).
+     */
+    async manualAssign(actor: Actor, bookingPublicId: string, input: ManualAssignDriverInput) {
+      const t = now();
+      const booking = await Booking.findOne({ publicId: bookingPublicId });
+      if (!booking) throw new AppError('NOT_FOUND', 'Booking not found.');
+
+      const assignableStatuses: BookingStatus[] = ['REQUESTED', 'DISPATCHING', 'DRIVER_ASSIGNED'];
+      if (!assignableStatuses.includes(booking.status)) {
+        throw new AppError(
+          'RIDE_INVALID_STATE',
+          `Cannot assign driver to a booking in status ${booking.status}.`,
+        );
+      }
+
+      const driver = await DriverProfile.findById(input.driverId);
+      if (!driver) throw new AppError('NOT_FOUND', 'Driver not found.');
+      if (driver.approvalStatus !== 'APPROVED') {
+        throw new AppError('DRIVER_NOT_ELIGIBLE', 'Driver is not approved.');
+      }
+      if (driver.onlineStatus !== 'ONLINE') {
+        throw new AppError('DRIVER_NOT_ELIGIBLE', 'Driver is not online.');
+      }
+
+      if (booking.assignedDriverId && booking.assignedDriverId.equals(driver._id)) {
+        const existingRide = await Ride.findOne({ bookingId: booking._id, driverId: driver._id }).lean();
+        return {
+          bookingId: booking.publicId,
+          rideId: existingRide?.publicId ?? booking.rideId ?? '',
+          driverId: driver._id.toString(),
+          vehicleId: driver.currentVehicleId?.toString() ?? '',
+          status: 'DRIVER_ASSIGNED' as const,
+        };
+      }
+
+      const vehicleFilter: Record<string, unknown> = {
+        driverId: driver._id,
+        categoryId: booking.categoryId,
+        verificationStatus: 'VERIFIED',
+        active: true,
+      };
+      if (input.vehicleId) {
+        vehicleFilter['_id'] = input.vehicleId;
+      }
+      const vehicle = await Vehicle.findOne(vehicleFilter).lean();
+      if (!vehicle) {
+        throw new AppError(
+          'DRIVER_NOT_ELIGIBLE',
+          'Driver has no active, verified vehicle in the required category.',
+        );
+      }
+
+      const claimed = await DriverProfile.findOneAndUpdate(
+        {
+          _id: driver._id,
+          approvalStatus: 'APPROVED',
+          onlineStatus: 'ONLINE',
+          activeRideId: null,
+        },
+        { activeRideId: booking._id, activeRideSince: t },
+        { returnDocument: 'after' },
+      );
+      if (!claimed) {
+        throw new AppError('CONFLICT', 'Driver is busy or no longer available.');
+      }
+
+      const previousDriverId = booking.assignedDriverId;
+      if (previousDriverId && !previousDriverId.equals(driver._id)) {
+        await DriverProfile.updateOne(
+          { _id: previousDriverId, activeRideId: booking._id },
+          { $set: { activeRideId: null }, $unset: { activeRideSince: 1 } },
+        );
+        await Booking.updateOne(
+          { _id: booking._id },
+          {
+            $push: {
+              previousDrivers: {
+                driverId: previousDriverId,
+                cancelledAt: t,
+                reasonCode: 'ADMIN_REASSIGNMENT',
+              },
+            },
+          },
+        );
+        const oldDriver = await DriverProfile.findById(previousDriverId).select('userId').lean();
+        if (oldDriver) {
+          await notifier.offerAnswered(oldDriver.userId.toString(), booking.publicId);
+        }
+      }
+
+      const updatedBooking = await Booking.findOneAndUpdate(
+        {
+          _id: booking._id,
+          status: { $in: assignableStatuses },
+        },
+        {
+          $set: {
+            assignedDriverId: driver._id,
+            assignedAt: t,
+            status: 'DRIVER_ASSIGNED',
+          },
+        },
+        { returnDocument: 'after' },
+      );
+
+      if (!updatedBooking) {
+        await releaseDriver(driver._id, booking._id);
+        throw new AppError('CONFLICT', 'Booking status changed concurrently.');
+      }
+
+      await withdrawOffers(booking._id, undefined, 'TAKEN');
+      await withdrawDriverOffers(driver._id);
+
+      const nonce = randomBytes(8).toString('hex');
+      const otp = {
+        nonce,
+        attempts: 0,
+        issuedAt: t,
+        expiresAt: new Date(t.getTime() + config.otpTtlMs),
+      };
+
+      const previousRide = await Ride.findOne({ bookingId: booking._id }).select('_id').lean();
+      const ride = previousRide
+        ? await Ride.findOneAndUpdate(
+            { _id: previousRide._id },
+            {
+              $set: {
+                driverId: driver._id,
+                driverUserId: driver.userId,
+                vehicleId: vehicle._id,
+                assignedAt: t,
+                otp,
+                stopLog: [],
+              },
+              $unset: {
+                enRouteAt: 1,
+                arrivedAt: 1,
+                arrivalLocation: 1,
+                startedAt: 1,
+                startLocation: 1,
+                cancelledAt: 1,
+              },
+            },
+            { returnDocument: 'after' },
+          )
+        : await Ride.create({
+            publicId: publicId('ride'),
+            bookingId: booking._id,
+            bookingPublicId: booking.publicId,
+            customerId: booking.customerId,
+            driverId: driver._id,
+            driverUserId: driver.userId,
+            vehicleId: vehicle._id,
+            assignedAt: t,
+            otp,
+          });
+
+      if (!ride) throw new Error('Failed to create or update ride record');
+
+      await Booking.updateOne({ _id: booking._id }, { rideId: ride.publicId });
+
+      await record({
+        bookingId: booking._id,
+        type: 'DRIVER_ASSIGNED',
+        fromStatus: booking.status,
+        toStatus: 'DRIVER_ASSIGNED',
+        actorType: 'ADMIN',
+        actorId: actor.userId,
+        at: t,
+        metadata: {
+          rideId: ride.publicId,
+          reason: input.reason,
+          reassignedFrom: previousDriverId ? previousDriverId.toString() : null,
+        },
+      });
+
+      return {
+        bookingId: booking.publicId,
+        rideId: ride.publicId,
+        driverId: driver._id.toString(),
+        vehicleId: vehicle._id.toString(),
+        status: 'DRIVER_ASSIGNED' as const,
       };
     },
   };

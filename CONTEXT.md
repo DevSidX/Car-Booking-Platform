@@ -49,7 +49,7 @@ Legend: [x] done and tested, [~] done but unverified in a real environment, [ ] 
 - [~] docker-compose (Mongo replica set + Redis): written, never run (Docker not installed)
 - [~] CI workflow: written, never run on GitHub
 - [~] Health readiness against real Mongo/Redis: only tested with fakes
-- [ ] Save original specs into `docs/specs/` (user to copy the PDFs)
+- [x] Save original specs into `docs/specs/` (spec-a-backend-developer-specification.md and spec-b-technical-specification-v1.0.md)
 - [ ] Choose staging hosting; metrics/alerting (deferred to P8)
 
 ### P1 Accounts: DONE (with unverified items)
@@ -59,7 +59,7 @@ Legend: [x] done and tested, [~] done but unverified in a real environment, [ ] 
 - [ ] Real SMS provider, real object storage (R2/S3) adapters
 - [ ] Redis-backed rate limiter (before multi-instance deploy)
 - [ ] Decide driver approval gate (documents/vehicle required?) and admin login method
-- [ ] Customer saved places (deferred; ride history comes with P3)
+- [x] Customer saved places (Implemented in DEV 2 with CRUD, 20-place cap, GeoJSON coordinates, privacy export/deletion integration)
 
 ### P2 Booking & pricing: DONE (with unverified items)
 - [x] Service zones (GeoJSON polygon, 2dsphere, operating hours Asia/Kolkata) + admin CRUD, serviceability endpoint

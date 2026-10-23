@@ -58,6 +58,8 @@ import { staffAuthRouter } from './modules/staffauth/staffauth.routes';
 import { createStaffService } from './modules/staff/staff.service';
 import { staffRouter } from './modules/staff/staff.routes';
 import { createCouponsService } from './modules/coupons/coupons.service';
+import { createReferralsService } from './modules/referrals/referrals.service';
+import { referralsRouter } from './modules/referrals/referrals.routes';
 import { couponsRouter } from './modules/coupons/coupons.routes';
 import { createSafetyService } from './modules/safety/safety.service';
 import { safetyRouter } from './modules/safety/safety.routes';
@@ -261,7 +263,6 @@ export function createApp(deps: AppDeps): Express {
   v1.use(staffAuthRouter(ctx, staffAuth, authLimiter));
   v1.use(customersRouter(ctx));
   v1.use(categoriesRouter(ctx));
-  v1.use(driversRouter(ctx));
   v1.use(vehiclesRouter(ctx));
   v1.use(auditRouter(ctx));
 
@@ -280,6 +281,7 @@ export function createApp(deps: AppDeps): Express {
       TIPS: true,
       WALLET: true,
       CORPORATE: true,
+      REFERRALS: true,
       ...deps.featureDefaults,
     },
   });
@@ -307,6 +309,8 @@ export function createApp(deps: AppDeps): Express {
   const bus = deps.realtimeBus ?? nullBus;
   const notifications = createNotificationsService({
     push: deps.providers.push,
+    sms: deps.providers.sms,
+    audit: ctx.audit,
     now: ctx.now,
     logger: deps.logger,
   });
@@ -440,8 +444,9 @@ export function createApp(deps: AppDeps): Express {
   v1.use(dispatchRouter(ctx, dispatch));
   v1.use(ridesRouter(ctx, rides));
   v1.use(
-    adminRouter(ctx, createAdminService({ audit: ctx.audit, now: ctx.now, bus, notifier, ledger })),
+    adminRouter(ctx, createAdminService({ audit: ctx.audit, now: ctx.now, bus, notifier, ledger, dispatch })),
   );
+  v1.use(driversRouter(ctx));
   v1.use(notificationsRouter(ctx, notifications));
   v1.use(
     financeRouter(ctx, {
@@ -508,6 +513,8 @@ export function createApp(deps: AppDeps): Express {
   v1.use(flagsRouter(ctx, flags));
   v1.use(staffRouter(ctx, staff));
   v1.use(couponsRouter(ctx, coupons));
+  const referrals = createReferralsService({ flags, audit: ctx.audit, now: ctx.now });
+  v1.use(referralsRouter(ctx, referrals));
   v1.use(safetyRouter(ctx, safety));
   v1.use(supportRouter(ctx, support));
   v1.use(ratingsRouter(ctx, ratings));
@@ -543,6 +550,7 @@ export function createApp(deps: AppDeps): Express {
     flags,
     safety,
     coupons,
+    referrals,
     ratings,
     housekeeping,
     dispatch,

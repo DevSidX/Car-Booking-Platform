@@ -57,6 +57,10 @@ export const ErrorCodes = {
     message: 'You have not waited long enough at the pickup to mark a no-show.',
   },
   LOCATION_REJECTED: { status: 422, message: 'This location update was rejected.' },
+  BOOKING_RESTRICTED: {
+    status: 403,
+    message: 'Your account is restricted from creating new bookings.',
+  },
   UNPAID_BALANCE: {
     status: 402,
     message: 'You have an unpaid ride. Please pay it before booking another.',

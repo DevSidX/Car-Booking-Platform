@@ -1,13 +1,17 @@
 import type { Logger } from 'pino';
+import type { Actor } from '../../common/actor';
 import { AppError } from '../../common/errors';
 import { pageMeta } from '../../common/pagination';
-import { InvalidPushTokenError, type PushProvider } from '../../providers';
+import { InvalidPushTokenError, type PushProvider, type SmsProvider } from '../../providers';
+import type { AuditService } from '../audit/audit.service';
+import { User } from '../users/user.model';
 import { Device } from './device.model';
 import { Notification } from './notification.model';
 import type {
   MarkReadInput,
   NotificationListQuery,
   RegisterDeviceInput,
+  TestNotificationInput,
 } from './notifications.schemas';
 
 const DUPLICATE_KEY = 11000;
@@ -40,10 +44,13 @@ export type DeliveryReport = {
 
 export function createNotificationsService(deps: {
   push: PushProvider;
+  sms?: SmsProvider;
+  audit?: AuditService;
   now: () => Date;
   logger: Logger;
 }) {
   const { push, now, logger } = deps;
+  const testRateLimitWindow = new Map<string, number[]>();
 
   const view = (n: {
     _id: { toString(): string };
@@ -198,42 +205,31 @@ export function createNotificationsService(deps: {
         const t = now();
         const n = await Notification.findOneAndUpdate(
           {
-            $or: [
-              { status: 'PENDING', nextAttemptAt: { $lte: t } },
-              { status: 'SENDING', lockUntil: { $lt: t } },
-            ],
+            status: 'PENDING',
+            nextAttemptAt: { $lte: t },
+            $or: [{ lockUntil: null }, { lockUntil: { $lte: t } }],
           },
           { status: 'SENDING', lockUntil: new Date(t.getTime() + SEND_LEASE_MS) },
-          { sort: { nextAttemptAt: 1 }, returnDocument: 'after' },
+          { returnDocument: 'after' },
         );
-        if (!n) break;
+        if (!n) break; // nothing due
 
         if (n.expiresAt && n.expiresAt.getTime() <= t.getTime()) {
           await Notification.updateOne({ _id: n._id }, { status: 'EXPIRED' });
           report.expired += 1;
           continue;
         }
-        const devices = await Device.find({ userId: n.userId }).lean();
-        if (devices.length === 0) {
-          await Notification.updateOne({ _id: n._id }, { status: 'SKIPPED' });
-          report.skipped += 1;
-          continue;
-        }
 
-        const data = n.data ? Object.fromEntries(n.data) : undefined;
-        const ttlSeconds = n.expiresAt
-          ? Math.max(1, Math.ceil((n.expiresAt.getTime() - t.getTime()) / 1000))
-          : undefined;
+        const devices = await Device.find({ userId: n.userId }).sort({ lastSeenAt: -1 }).lean();
         let delivered = 0;
-        let transient: string | undefined;
+        let transient: string | null = null;
         for (const d of devices) {
           try {
             await push.send(d.token, {
               title: n.title,
               body: n.body,
-              data: { ...data, notificationId: n._id.toString(), type: n.type },
-              priority: n.priority === 'high' ? 'high' : 'normal',
-              ...(ttlSeconds ? { ttlSeconds } : {}),
+              data: n.data instanceof Map ? Object.fromEntries(n.data) : (n.data ?? {}),
+              priority: n.priority as 'high' | 'normal',
             });
             delivered += 1;
           } catch (err) {
@@ -279,6 +275,65 @@ export function createNotificationsService(deps: {
         }
       }
       return report;
+    },
+
+    /* ---------- admin test notification ---------- */
+
+    async sendTestNotification(actor: Actor, input: TestNotificationInput) {
+      const adminKey = actor.userId;
+      const t = now();
+      const windowStart = t.getTime() - 60_000;
+      let history = testRateLimitWindow.get(adminKey) ?? [];
+      history = history.filter((ts) => ts > windowStart);
+      if (history.length >= 10) {
+        throw new AppError('RATE_LIMITED', 'Rate limit exceeded: max 10 test notifications per minute.');
+      }
+      history.push(t.getTime());
+      testRateLimitWindow.set(adminKey, history);
+
+      const recipient = await User.findById(input.recipientId);
+      if (!recipient) throw new AppError('NOT_FOUND', 'Recipient user not found.');
+
+      let outcome: 'delivered' | 'queued' | 'mock' | 'failed';
+      if (input.channel === 'sms') {
+        if (!deps.sms) throw new AppError('SERVICE_UNAVAILABLE', 'SMS provider not configured.');
+        try {
+          await deps.sms.sendText(recipient.phone, `[TEST] ${input.body}`);
+          outcome = 'delivered';
+        } catch (err: unknown) {
+          logger.warn({ err }, 'Test SMS delivery failed');
+          outcome = 'failed';
+        }
+      } else {
+        const dedupeKey = `test_${actor.userId}_${t.getTime()}`;
+        await Notification.create({
+          userId: recipient._id,
+          type: 'TEST_NOTIFICATION',
+          title: input.title ?? 'Test Notification',
+          body: input.body,
+          dedupeKey,
+          priority: 'high',
+          nextAttemptAt: t,
+        });
+        outcome = 'queued';
+      }
+
+      if (deps.audit) {
+        await deps.audit.record(actor, {
+          action: 'ADMIN_TEST_NOTIFICATION_SENT',
+          targetType: 'User',
+          targetId: recipient._id.toString(),
+          metadata: { channel: input.channel, outcome },
+        });
+      }
+
+      return {
+        success: outcome !== 'failed',
+        recipientId: recipient._id.toString(),
+        channel: input.channel,
+        outcome,
+        sentAt: t,
+      };
     },
   };
 }
