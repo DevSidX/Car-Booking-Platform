@@ -90,9 +90,32 @@ A background job stopped succeeding (named in the alert).
 
 **Leaked secret.** Replace it (JWT secrets, Razorpay, SMS, Firebase, database password), redeploy. Replacing a JWT secret signs everyone out, which is fine. Razorpay and database passwords are changed in their dashboards first, then in the server settings.
 
-## Backups and restore (fill in when the host exists)
-- Atlas: turn on continuous cloud backup for the production cluster (M10 or larger; the free M0 has none).
-- Restore drill: restore the latest snapshot to a NEW cluster, point a staging server at it, run `GET /admin/finance/consistency` and `GET /admin/system/health`, open a few rides. Record the date and how long it took here: **not done yet**.
+## Backups and restore
+
+Two things must be saved: the **database** and the **uploads folder** (driver documents, while storage is the server disk). Neither is saved by the other.
+
+### Database
+- Best: Atlas continuous cloud backup (needs a paid cluster, M10 or larger; the free M0 has none).
+- Until then, or as a second copy: the built-in tool, which needs nothing installed except the app.
+  - Back up: `npm run backup -- dump /backups/db-$(date +%F)` (in the container: `docker compose --env-file .env.staging run --rm -v $HOME/backups:/backups api node dist/tools/backupRun.js dump /backups/db-$(date +%F)`; the folder must be writable by the container user, `chmod 777` it or run as the same user). It prints how many collections and documents it saved and verifies its own checksums.
+  - Prove an old backup is intact (no database needed): `npm run backup -- verify <folder>`. Do this on a schedule; a backup nobody has verified is a hope.
+  - It is a copy of the data as the dump reads it, not a frozen instant: take it when the app is quiet (early morning), and expect the last minute of activity to be missing in a restore.
+  - It does **not** save indexes. After a restore run `npm run indexes:prod`.
+- Backups contain phone numbers, token hashes and bank references. Copy them off the server, keep them encrypted, and delete old ones. The tool can encrypt for you: `export BACKUP_ENCRYPTION_KEY=$(openssl rand -hex 32)` once, keep that key in a password manager (not beside the backups; lose it and they cannot be opened), then `npm run backup:prod -- dump --encrypt`. `verify` and `restore` need the same key set.
+- Old or orphaned driver-document files: `npm run uploads:sweep:prod` lists them (dry run); add `-- --delete` to remove. Run it monthly.
+
+### Uploads folder
+`docker run --rm -v <folder>_uploads:/data -v $HOME/backups:/backup alpine tar czf /backup/uploads-$(date +%F).tar.gz -C /data .` (volume name from `docker volume ls`). Copy it off the server too.
+
+### Restore drill (do it once, then every quarter)
+1. Point `MONGODB_URI` at a **new, empty database** (never the live one): same cluster with another database name is fine.
+2. `npm run backup -- restore <folder> --into <that database name>`. It refuses a database with data in it, and refuses a backup that fails its checksums.
+3. `npm run indexes`, then start a server on it.
+4. Check `GET /admin/finance/consistency` says `ok: true` and `GET /admin/system/health` is green; open a few rides.
+5. `npm run backup -- compare <live database> <restored database>` should say IDENTICAL (differences are expected only for what changed since the backup).
+6. Write the date, how long it took, and who did it here.
+
+Drill done on the developer database, 2026-10-23, by Dev 1: dumped 48 collections / 7 documents, verified, restored into a temporary database, compared IDENTICAL, temporary database deleted. That proves the tool, **not** a restore of a real staging or production database: repeat on staging when it exists. Date/time/owner of the first staging drill: **not done yet**.
 
 ## Contacts (fill in)
 Safety desk phone: ______  Finance: ______  Developer on call: ______  Razorpay support: ______  Atlas support: ______

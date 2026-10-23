@@ -18,7 +18,8 @@ CI pipeline (`.github/workflows/ci.yml`) and the health endpoints a platform nee
 - Liveness probe: `GET /api/v1/health/live`; readiness probe: `GET /api/v1/health/ready`.
 - SIGTERM triggers graceful shutdown: readiness turns 503, server stops accepting, connections close (10 s hard cap).
 - Secrets from the platform secret store, never from Git.
-- **Run ONE instance** until the Redis socket adapter exists: live events only reach sockets on the same instance, and the in-memory rate limiter is per instance. The database sweeper, reconciler and push worker are safe on several instances.
+- **Run ONE instance while driver documents are on the server disk** (`STORAGE_DRIVER=local`): the files belong to one machine. With `REDIS_URL` set, the socket adapter and rate-limit counts are shared between instances (built, not yet tested with two real instances), and the database sweeper, reconciler and push worker are safe on several instances. Moving storage to S3/R2 removes the one-instance limit.
+- **Step-by-step staging deploy:** `docs/staging-deploy.md` (files in `infra/staging/`). Check every integration with `npm run verify:live` (or `node dist/tools/verifyLiveRun.js` on the server).
 - WebSockets must be allowed by the host/load balancer (sticky sessions are not needed with the websocket transport only).
 - Real payments: set `PAYMENTS_DRIVER=razorpay` with `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` (TEST keys outside production). In the Razorpay dashboard add a webhook to `https://<api-host>/api/v1/webhooks/razorpay` with the same secret and the events `payment.captured`, `order.paid`, `payment.failed`, `refund.processed`, `refund.failed`. Leave `PAYMENTS_DRIVER` unset for mock payments (no real money; a development-only completion route is exposed outside production).
 - Run `npm run indexes:prod` on release: Phase 6 added the ledger, payments, refunds, settlements and webhook collections.

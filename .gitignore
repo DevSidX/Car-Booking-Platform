@@ -14,3 +14,9 @@ Thumbs.db
 
 # local load-test output
 backend/load-results.json
+backend/verify-live-results.json
+
+# local backups and uploaded driver documents (personal data; never commit)
+backup-*/
+backend/uploads/
+backend/data/
