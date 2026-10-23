@@ -5,6 +5,7 @@ import { createLogger } from '../src/common/logger';
 import { AppError } from '../src/common/errors';
 import { EnvValidationError, loadEnv } from '../src/config/env';
 import { createProviders } from '../src/providers';
+import { authConfigFromEnv } from '../src/modules/auth/auth.config';
 
 const logger = createLogger('silent');
 const baseEnv = {
@@ -19,6 +20,8 @@ function makeApp(opts: { mongoUp?: boolean; shuttingDown?: boolean } = {}) {
   const { mongoUp = true, shuttingDown = false } = opts;
   return createApp({
     logger,
+    providers: createProviders({ NODE_ENV: 'test', PROVIDER_MODE: 'mock' }),
+    authConfig: authConfigFromEnv(loadEnv(baseEnv)),
     corsOrigins: ['http://localhost:3000'],
     isShuttingDown: () => shuttingDown,
     readinessChecks: [
