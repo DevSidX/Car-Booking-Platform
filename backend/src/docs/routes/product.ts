@@ -137,7 +137,8 @@ export const productRoutes: RouteDoc[] = [
     method: 'post',
     path: '/admin/bookings/{bookingId}/assign-driver',
     tag: 'Dispatch',
-    summary: 'Manually assign or reassign an eligible driver to a booking with atomic conditional claim (audited)',
+    summary:
+      'Manually assign or reassign an eligible driver to a booking with atomic conditional claim (audited)',
     auth: REVIEW,
     body: {
       driverId: '507f1f77bcf86cd799439022',
