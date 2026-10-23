@@ -50,57 +50,29 @@
   ],
   "item": [
     {
-      "name": "Health",
+      "name": "Customers",
       "item": [
         {
-          "name": "GET /health/live - Liveness probe",
+          "name": "GET /customers/me/places - List own saved places (home, work, other)",
           "request": {
             "method": "GET",
-            "auth": {
-              "type": "noauth"
-            },
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/health/live",
+              "raw": "{{baseUrl}}/customers/me/places",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "health",
-                "live"
+                "customers",
+                "me",
+                "places"
               ],
               "query": []
             }
           }
         },
         {
-          "name": "GET /health/ready - Readiness probe (MongoDB, Redis)",
-          "request": {
-            "method": "GET",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/health/ready",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "health",
-                "ready"
-              ],
-              "query": []
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Locations",
-      "item": [
-        {
-          "name": "POST /locations/autocomplete - Address suggestions while the rider or driver types. Send the same sessionToken (any 8-64 character id the app makes) for every keystroke of one search and for the place lookup that follows, so the search is billed once. near (the position of the user) puts close places first. Each suggestion has a placeId; send it to POST /locations/place to get coordinates. Limited per user per minute",
+          "name": "POST /customers/me/places - Create a saved place (enforces configurable limit, valid coordinates)",
           "request": {
             "method": "POST",
             "header": [
@@ -110,240 +82,20 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/locations/autocomplete",
+              "raw": "{{baseUrl}}/customers/me/places",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "locations",
-                "autocomplete"
+                "customers",
+                "me",
+                "places"
               ],
               "query": []
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"input\": \"connaught pl\",\n  \"sessionToken\": \"search-0001-abcdef\",\n  \"near\": {\n    \"lat\": 28.6315,\n    \"lng\": 77.2167\n  }\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "POST /locations/place - The coordinates and address of a suggestion the user picked (from POST /locations/autocomplete). 404 if the place is unknown. Use the returned point as the pickup or drop of a fare quote",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/locations/place",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "locations",
-                "place"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"placeId\": \"ChIJxxxxxxxx\",\n  \"sessionToken\": \"search-0001-abcdef\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "POST /locations/reverse-geocode - Names a spot on the map (the pin the user dropped). address is null when nothing is known there",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/locations/reverse-geocode",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "locations",
-                "reverse-geocode"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"lat\": 28.6315,\n  \"lng\": 77.2167\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "POST /routes/estimate - A route preview: road distance, time and the path (polyline in Google encoded format, null if unavailable). For drawing the trip on a map only. The price of a trip always comes from POST /fare-quotes, never from here",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/routes/estimate",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "routes",
-                "estimate"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"origin\": {\n    \"lat\": 28.6315,\n    \"lng\": 77.2167\n  },\n  \"destination\": {\n    \"lat\": 28.5562,\n    \"lng\": 77.1\n  }\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Files",
-      "item": [
-        {
-          "name": "PUT /files/upload - Send a file to the signed link returned by POST /drivers/me/documents (server upload folder). Send the file bytes as the body with the same Content-Type that was declared. The link works for 10 minutes; the file must be a real JPEG, PNG or PDF within the size limit. No login token is needed: the link is the permission",
-          "request": {
-            "method": "PUT",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/files/upload",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "files",
-                "upload"
-              ],
-              "query": [
-                {
-                  "key": "key",
-                  "value": "from the link",
-                  "disabled": false
-                },
-                {
-                  "key": "ct",
-                  "value": "from the link",
-                  "disabled": false
-                },
-                {
-                  "key": "exp",
-                  "value": "from the link",
-                  "disabled": false
-                },
-                {
-                  "key": "sig",
-                  "value": "from the link",
-                  "disabled": false
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "GET /files/download - Download a file through a signed link (for example the one staff get when they open a driver document). The link works for 5 minutes. The file is always sent as a download, never shown as a page",
-          "request": {
-            "method": "GET",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/files/download",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "files",
-                "download"
-              ],
-              "query": [
-                {
-                  "key": "key",
-                  "value": "from the link",
-                  "disabled": false
-                },
-                {
-                  "key": "exp",
-                  "value": "from the link",
-                  "disabled": false
-                },
-                {
-                  "key": "sig",
-                  "value": "from the link",
-                  "disabled": false
-                }
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Auth",
-      "item": [
-        {
-          "name": "POST /auth/otp/request - Request a login OTP (rate limited per phone and IP)",
-          "request": {
-            "method": "POST",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/auth/otp/request",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "otp",
-                "request"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"phone\": \"+919876543210\",\n  \"purpose\": \"login\"\n}",
+              "raw": "{\n  \"name\": \"My Home\",\n  \"type\": \"home\",\n  \"address\": \"B-12 Connaught Place, New Delhi\",\n  \"lat\": 28.6315,\n  \"lng\": 77.2167\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -357,19 +109,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.collectionVariables.set('challengeId', pm.response.json().data.challengeId);"
+                  "pm.collectionVariables.set('placeId', pm.response.json().data.id);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "POST /auth/otp/verify - Verify OTP; creates the account on first login (role CUSTOMER or DRIVER only)",
+          "name": "PATCH /customers/me/places/{placeId} - Update own saved place",
           "request": {
-            "method": "POST",
-            "auth": {
-              "type": "noauth"
-            },
+            "method": "PATCH",
             "header": [
               {
                 "key": "Content-Type",
@@ -377,163 +126,102 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/auth/otp/verify",
+              "raw": "{{baseUrl}}/customers/me/places/{{placeId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "auth",
-                "otp",
-                "verify"
+                "customers",
+                "me",
+                "places",
+                "{{placeId}}"
               ],
               "query": []
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"phone\": \"+919876543210\",\n  \"otp\": \"123456\",\n  \"role\": \"CUSTOMER\",\n  \"device\": {\n    \"platform\": \"android\",\n    \"deviceId\": \"device-123\",\n    \"appVersion\": \"1.0.0\"\n  }\n}",
+              "raw": "{\n  \"name\": \"Home Office\",\n  \"address\": \"Flat 402, Block C, Connaught Place, New Delhi\",\n  \"lat\": 28.632,\n  \"lng\": 77.217\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const d = pm.response.json().data; pm.collectionVariables.set('accessToken', d.accessToken); pm.collectionVariables.set('refreshToken', d.refreshToken);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /auth/refresh - Rotate tokens. Reusing an old refresh token revokes the session.",
-          "request": {
-            "method": "POST",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/auth/refresh",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "refresh"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\",\n  \"device\": {\n    \"platform\": \"android\",\n    \"deviceId\": \"device-123\",\n    \"appVersion\": \"1.0.0\"\n  }\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const d = pm.response.json().data; pm.collectionVariables.set('accessToken', d.accessToken); pm.collectionVariables.set('refreshToken', d.refreshToken);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /auth/logout - Revoke current session",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/auth/logout",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "logout"
-              ],
-              "query": []
-            }
           }
         },
         {
-          "name": "GET /auth/me - Current user",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/auth/me",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "me"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "GET /auth/sessions - List active sessions",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/auth/sessions",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "sessions"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "DELETE /auth/sessions/{sessionId} - Revoke one of your own sessions",
+          "name": "DELETE /customers/me/places/{placeId} - Delete own saved place",
           "request": {
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/auth/sessions/{{sessionId}}",
+              "raw": "{{baseUrl}}/customers/me/places/{{placeId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "auth",
-                "sessions",
-                "{{sessionId}}"
+                "customers",
+                "me",
+                "places",
+                "{{placeId}}"
               ],
               "query": []
             }
           }
-        }
-      ]
-    },
-    {
-      "name": "Customers",
-      "item": [
+        },
+        {
+          "name": "GET /customers/me/referrals - Get unique referral code, shareable link, referral stats and reward history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/me/referrals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "me",
+                "referrals"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /customers/me/referrals/claim - Apply a referral code to receive referral coupon reward",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/customers/me/referrals/claim",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "me",
+                "referrals",
+                "claim"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"REF-123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
         {
           "name": "GET /customers/me - Get own profile",
           "request": {
@@ -587,336 +275,42 @@
       ]
     },
     {
-      "name": "Catalog",
-      "item": [
-        {
-          "name": "GET /cab-categories - List active cab categories",
-          "request": {
-            "method": "GET",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/cab-categories",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "cab-categories"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "GET /admin/cab-categories - List all categories incl. inactive",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/admin/cab-categories",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "admin",
-                "cab-categories"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "POST /admin/cab-categories - Create category",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/admin/cab-categories",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "admin",
-                "cab-categories"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"code\": \"LUXURY\",\n  \"name\": \"Luxury\",\n  \"capacity\": 4,\n  \"displayOrder\": 4,\n  \"active\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "PATCH /admin/cab-categories/{categoryId} - Update category (code is immutable)",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/admin/cab-categories/{{categoryId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "admin",
-                "cab-categories",
-                "{{categoryId}}"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Luxury Plus\",\n  \"active\": false\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Drivers",
-      "item": [
-        {
-          "name": "POST /drivers/applications - Submit (or resubmit) onboarding application",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/applications",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "applications"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"fullName\": \"Ravi Kumar\",\n  \"city\": \"Delhi\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "GET /drivers/me/application - Application status, documents, decision reason",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/me/application",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "me",
-                "application"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "POST /drivers/me/documents - Register a KYC document; returns a signed upload URL. Upload the file to that URL with an HTTP PUT whose Content-Type header is exactly the contentType you declared (max 10 MB), then call the \"uploaded\" endpoint",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/me/documents",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "me",
-                "documents"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"DRIVING_LICENCE\",\n  \"documentNumberLast4\": \"1234\",\n  \"expiresAt\": \"2028-05-31T00:00:00.000Z\",\n  \"contentType\": \"image/jpeg\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "GET /drivers/me/documents - List own documents",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/me/documents",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "me",
-                "documents"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "POST /drivers/me/documents/{documentId}/uploaded - Tell the server the file is uploaded. It looks in storage: the file must be there, under 10 MB and of the declared type. A bad file is deleted. Staff can approve a document only when its file is really there",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/me/documents/{{documentId}}/uploaded",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "me",
-                "documents",
-                "{{documentId}}",
-                "uploaded"
-              ],
-              "query": []
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Vehicles",
-      "item": [
-        {
-          "name": "POST /drivers/me/vehicles - Register a vehicle",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/me/vehicles",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "me",
-                "vehicles"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"registrationNumber\": \"DL 01 AB 1234\",\n  \"make\": \"Maruti\",\n  \"model\": \"Dzire\",\n  \"color\": \"White\",\n  \"seats\": 4\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "GET /drivers/me/vehicles - List own vehicles",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/me/vehicles",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "me",
-                "vehicles"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "PATCH /drivers/me/vehicles/{vehicleId} - Edit make/model/color/seats",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/me/vehicles/{{vehicleId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "me",
-                "vehicles",
-                "{{vehicleId}}"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"color\": \"Black\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    {
       "name": "Admin",
       "item": [
+        {
+          "name": "POST /admin/customers/{customerId}/restrictions - Apply or lift a booking restriction on a customer (mandatory reason, audited)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/customers/{{customerId}}/restrictions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "customers",
+                "{{customerId}}",
+                "restrictions"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"RESTRICT\",\n  \"reason\": \"Repeated cancellation fraud observed in sector 14\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
         {
           "name": "GET /admin/drivers - Search/filter drivers",
           "request": {
@@ -1392,6 +786,1593 @@
                   "disabled": false
                 }
               ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "POST /admin/notifications/test - Send an audited test push or SMS notification to a specific eligible recipient",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notifications/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notifications",
+                "test"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channel\": \"push\",\n  \"recipientId\": \"507f1f77bcf86cd799439011\",\n  \"title\": \"Test Notification\",\n  \"body\": \"This is a test notification from operations staff.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /devices - Register this phone for push. The push token belongs to one user: registering it on another account moves it. Call again whenever the token changes; send deviceId so the old token is replaced",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/devices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "devices"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"fcm-device-token-from-firebase-sdk\",\n  \"platform\": \"android\",\n  \"deviceId\": \"device-123\",\n  \"appVersion\": \"1.0.0\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /devices/{deviceId} - Stop push to this device (call on logout). Only your own devices",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/devices/{{deviceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "devices",
+                "{{deviceId}}"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /notifications - In-app inbox, newest first. meta.unreadCount is the badge number",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications"
+              ],
+              "query": [
+                {
+                  "key": "unread",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /notifications/read - Mark notifications read: send { ids: [...] } or { all: true }",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "read"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"all\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Operations",
+      "item": [
+        {
+          "name": "GET /admin/drivers/live - Live map feed of online and on-ride drivers within bounding box or zone (audited)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/drivers/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "drivers",
+                "live"
+              ],
+              "query": [
+                {
+                  "key": "minLat",
+                  "value": "28.40",
+                  "disabled": false
+                },
+                {
+                  "key": "maxLat",
+                  "value": "28.88",
+                  "disabled": false
+                },
+                {
+                  "key": "minLng",
+                  "value": "76.84",
+                  "disabled": false
+                },
+                {
+                  "key": "maxLng",
+                  "value": "77.55",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /admin/system/test-alert - Sends a harmless TEST ALERT through the real alert path (the log and, if ALERT_WEBHOOK_URL is set, the Slack/Discord webhook). Answers webhookConfigured and delivered (true only if the webhook accepted it). Use it after setting the webhook, and after any change to it. Audited",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/system/test-alert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "system",
+                "test-alert"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /admin/system/health - What the monitor sees right now: ledger balanced, stuck searches, unanswered SOS, push backlog, unfinished webhooks, payments missing from the ledger, dead background jobs. Each check says OK or what to do",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/system/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "system",
+                "health"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /admin/system/metrics - Request counts and speed per route (average and 95th percentile), status classes, server errors in the last 5 minutes, memory and event-loop lag for this server",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/system/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "system",
+                "metrics"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /metrics - The same numbers as Prometheus text for a metrics tool. Not a staff login: send Authorization: Bearer <METRICS_TOKEN>. Returns 404 when no token is configured",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ],
+              "query": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dispatch",
+      "item": [
+        {
+          "name": "GET /admin/dispatch/queue - List bookings awaiting driver assignment with server-calculated waiting duration",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/dispatch/queue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "dispatch",
+                "queue"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /admin/bookings/{bookingId}/assign-driver - Manually assign or reassign an eligible driver to a booking with atomic conditional claim (audited)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/bookings/{{bookingId}}/assign-driver",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "bookings",
+                "{{bookingId}}",
+                "assign-driver"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"driverId\": \"507f1f77bcf86cd799439022\",\n  \"reason\": \"Customer VIP request / dispatch timeout rescue\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /drivers/me/offers - Live (unexpired) ride offers for this driver",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/offers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "offers"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const o = pm.response.json().data[0]; if (o) pm.collectionVariables.set('offerId', o.offerId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ride-offers/{offerId}/accept - Accept an offer. Atomic: exactly one driver wins; others get 409 RIDE_ALREADY_ASSIGNED / OFFER_UNAVAILABLE. Retrying your own accept returns the same ride.",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ride-offers/{{offerId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride-offers",
+                "{{offerId}}",
+                "accept"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('rideId', pm.response.json().data.rideId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ride-offers/{offerId}/reject - Decline an offer; dispatch moves on to the next driver",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ride-offers/{{offerId}}/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ride-offers",
+                "{{offerId}}",
+                "reject"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Too far\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /bookings/{bookingId}/dispatch/retry - Search again for a booking in NO_DRIVER_FOUND (fresh round)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{bookingId}}/dispatch/retry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings",
+                "{{bookingId}}",
+                "dispatch",
+                "retry"
+              ],
+              "query": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Locations",
+      "item": [
+        {
+          "name": "POST /locations/autocomplete - Address suggestions while the rider or driver types. Send the same sessionToken (any 8-64 character id the app makes) for every keystroke of one search and for the place lookup that follows, so the search is billed once. near (the position of the user) puts close places first. Each suggestion has a placeId; send it to POST /locations/place to get coordinates. Limited per user per minute",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/locations/autocomplete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "locations",
+                "autocomplete"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"input\": \"connaught pl\",\n  \"sessionToken\": \"search-0001-abcdef\",\n  \"near\": {\n    \"lat\": 28.6315,\n    \"lng\": 77.2167\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /locations/place - The coordinates and address of a suggestion the user picked (from POST /locations/autocomplete). 404 if the place is unknown. Use the returned point as the pickup or drop of a fare quote",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/locations/place",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "locations",
+                "place"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"placeId\": \"ChIJxxxxxxxx\",\n  \"sessionToken\": \"search-0001-abcdef\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /locations/reverse-geocode - Names a spot on the map (the pin the user dropped). address is null when nothing is known there",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/locations/reverse-geocode",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "locations",
+                "reverse-geocode"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 28.6315,\n  \"lng\": 77.2167\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /routes/estimate - A route preview: road distance, time and the path (polyline in Google encoded format, null if unavailable). For drawing the trip on a map only. The price of a trip always comes from POST /fare-quotes, never from here",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/routes/estimate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "routes",
+                "estimate"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"origin\": {\n    \"lat\": 28.6315,\n    \"lng\": 77.2167\n  },\n  \"destination\": {\n    \"lat\": 28.5562,\n    \"lng\": 77.1\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Files",
+      "item": [
+        {
+          "name": "PUT /files/upload - Send a file to the signed link returned by POST /drivers/me/documents (server upload folder). Send the file bytes as the body with the same Content-Type that was declared. The link works for 10 minutes; the file must be a real JPEG, PNG or PDF within the size limit. No login token is needed: the link is the permission",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/files/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "files",
+                "upload"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "from the link",
+                  "disabled": false
+                },
+                {
+                  "key": "ct",
+                  "value": "from the link",
+                  "disabled": false
+                },
+                {
+                  "key": "exp",
+                  "value": "from the link",
+                  "disabled": false
+                },
+                {
+                  "key": "sig",
+                  "value": "from the link",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /files/download - Download a file through a signed link (for example the one staff get when they open a driver document). The link works for 5 minutes. The file is always sent as a download, never shown as a page",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/files/download",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "files",
+                "download"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "from the link",
+                  "disabled": false
+                },
+                {
+                  "key": "exp",
+                  "value": "from the link",
+                  "disabled": false
+                },
+                {
+                  "key": "sig",
+                  "value": "from the link",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "POST /rides/{rideId}/cash-collection/customer-confirm - The rider says how much cash they handed to the driver (optional). It never moves money: the driver confirming the exact fare is what settles the ride. If the amount differs from the fare it is recorded as a cash dispute and audited for staff. Repeating the same amount is fine; a different amount afterwards is refused (409). Cash rides only, after the ride is completed, within 7 days",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rides/{{rideId}}/cash-collection/customer-confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rides",
+                "{{rideId}}",
+                "cash-collection",
+                "customer-confirm"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountPaise\": 25000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /bookings/{bookingId}/payments - Start paying a completed ride (or a late-cancel / no-show fee) online. The server sets the amount. Same Idempotency-Key, or a payment already under way, returns the same order. Pass checkout.key and checkout.orderId to the Razorpay screen",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "pay-{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/{{bookingId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bookings",
+                "{{bookingId}}",
+                "payments"
+              ],
+              "query": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('paymentId', pm.response.json().data.paymentId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /payments/verify - After the Razorpay screen succeeds, send its orderId, paymentId and signature. Only a valid signature marks the booking paid (PAYMENT_SIGNATURE_INVALID otherwise). The webhook is the backup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "verify"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"order_xxx\",\n  \"paymentId\": \"pay_xxx\",\n  \"signature\": \"hex-from-razorpay\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /payments/{paymentId} - A payment attempt: status CREATED | PAID | FAILED | EXPIRED, amount, refunded amount",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payments/{{paymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "{{paymentId}}"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /customers/me/balance - What the rider owes, per booking, whether each is overdue and payable, and whether new bookings are blocked (UNPAID_BALANCE)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/me/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customers",
+                "me",
+                "balance"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /dev/payments/{paymentId}/complete - DEVELOPMENT ONLY (mock payments, never in production): pretend the rider paid, through the same path as a real capture. Not present when real payments are on",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dev/payments/{{paymentId}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dev",
+                "payments",
+                "{{paymentId}}",
+                "complete"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /webhooks/razorpay - Razorpay calls this (not the apps). Signature checked on the raw body; each event id is processed once. payment.captured / order.paid, payment.failed, refund.processed, refund.failed",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "X-Razorpay-Signature",
+                "value": "hex hmac of the raw body"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/webhooks/razorpay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "webhooks",
+                "razorpay"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /rides/{rideId}/cash-collected - Driver confirms the rider paid the exact fare in cash (CASH bookings only). The cash is added to what the driver holds; too much cash takes them offline until they hand some in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rides/{{rideId}}/cash-collected",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rides",
+                "{{rideId}}",
+                "cash-collected"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountPaise\": 25000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /drivers/me/balance - Cash held, what the platform owes the driver, the net (positive = driver owes the platform), the cash limit, and any open settlement",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "balance"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /drivers/me/earnings - Per ride: charged, platform commission, and what the driver earned; plus totals for the period",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/earnings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "earnings"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /drivers/me/settlements - The driver's own settlements",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/settlements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "settlements"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health/live - Liveness probe",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "live"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /health/ready - Readiness probe (MongoDB, Redis)",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ],
+              "query": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST /auth/otp/request - Request a login OTP (rate limited per phone and IP)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/otp/request",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "otp",
+                "request"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+919876543210\",\n  \"purpose\": \"login\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('challengeId', pm.response.json().data.challengeId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/otp/verify - Verify OTP; creates the account on first login (role CUSTOMER or DRIVER only)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/otp/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "otp",
+                "verify"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"phone\": \"+919876543210\",\n  \"otp\": \"123456\",\n  \"role\": \"CUSTOMER\",\n  \"device\": {\n    \"platform\": \"android\",\n    \"deviceId\": \"device-123\",\n    \"appVersion\": \"1.0.0\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().data; pm.collectionVariables.set('accessToken', d.accessToken); pm.collectionVariables.set('refreshToken', d.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/refresh - Rotate tokens. Reusing an old refresh token revokes the session.",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\",\n  \"device\": {\n    \"platform\": \"android\",\n    \"deviceId\": \"device-123\",\n    \"appVersion\": \"1.0.0\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().data; pm.collectionVariables.set('accessToken', d.accessToken); pm.collectionVariables.set('refreshToken', d.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/logout - Revoke current session",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /auth/me - Current user",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /auth/sessions - List active sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "sessions"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "DELETE /auth/sessions/{sessionId} - Revoke one of your own sessions",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "sessions",
+                "{{sessionId}}"
+              ],
+              "query": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Catalog",
+      "item": [
+        {
+          "name": "GET /cab-categories - List active cab categories",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cab-categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cab-categories"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "GET /admin/cab-categories - List all categories incl. inactive",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/cab-categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "cab-categories"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /admin/cab-categories - Create category",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/cab-categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "cab-categories"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"LUXURY\",\n  \"name\": \"Luxury\",\n  \"capacity\": 4,\n  \"displayOrder\": 4,\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "PATCH /admin/cab-categories/{categoryId} - Update category (code is immutable)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/cab-categories/{{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "cab-categories",
+                "{{categoryId}}"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Luxury Plus\",\n  \"active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Drivers",
+      "item": [
+        {
+          "name": "POST /drivers/applications - Submit (or resubmit) onboarding application",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/applications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "applications"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Ravi Kumar\",\n  \"city\": \"Delhi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /drivers/me/application - Application status, documents, decision reason",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/application",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "application"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /drivers/me/documents - Register a KYC document; returns a signed upload URL. Upload the file to that URL with an HTTP PUT whose Content-Type header is exactly the contentType you declared (max 10 MB), then call the \"uploaded\" endpoint",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "documents"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"DRIVING_LICENCE\",\n  \"documentNumberLast4\": \"1234\",\n  \"expiresAt\": \"2028-05-31T00:00:00.000Z\",\n  \"contentType\": \"image/jpeg\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /drivers/me/documents - List own documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "documents"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /drivers/me/documents/{documentId}/uploaded - Tell the server the file is uploaded. It looks in storage: the file must be there, under 10 MB and of the declared type. A bad file is deleted. Staff can approve a document only when its file is really there",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/documents/{{documentId}}/uploaded",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "documents",
+                "{{documentId}}",
+                "uploaded"
+              ],
+              "query": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Vehicles",
+      "item": [
+        {
+          "name": "POST /drivers/me/vehicles - Register a vehicle",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/vehicles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "vehicles"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"registrationNumber\": \"DL 01 AB 1234\",\n  \"make\": \"Maruti\",\n  \"model\": \"Dzire\",\n  \"color\": \"White\",\n  \"seats\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /drivers/me/vehicles - List own vehicles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/vehicles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "vehicles"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "PATCH /drivers/me/vehicles/{vehicleId} - Edit make/model/color/seats",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/drivers/me/vehicles/{{vehicleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "drivers",
+                "me",
+                "vehicles",
+                "{{vehicleId}}"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"color\": \"Black\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         }
@@ -2146,124 +3127,6 @@
       ]
     },
     {
-      "name": "Dispatch",
-      "item": [
-        {
-          "name": "GET /drivers/me/offers - Live (unexpired) ride offers for this driver",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/me/offers",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "me",
-                "offers"
-              ],
-              "query": []
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const o = pm.response.json().data[0]; if (o) pm.collectionVariables.set('offerId', o.offerId);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /ride-offers/{offerId}/accept - Accept an offer. Atomic: exactly one driver wins; others get 409 RIDE_ALREADY_ASSIGNED / OFFER_UNAVAILABLE. Retrying your own accept returns the same ride.",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/ride-offers/{{offerId}}/accept",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ride-offers",
-                "{{offerId}}",
-                "accept"
-              ],
-              "query": []
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.collectionVariables.set('rideId', pm.response.json().data.rideId);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /ride-offers/{offerId}/reject - Decline an offer; dispatch moves on to the next driver",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/ride-offers/{{offerId}}/reject",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ride-offers",
-                "{{offerId}}",
-                "reject"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"reason\": \"Too far\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "POST /bookings/{bookingId}/dispatch/retry - Search again for a booking in NO_DRIVER_FOUND (fresh round)",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/bookings/{{bookingId}}/dispatch/retry",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "bookings",
-                "{{bookingId}}",
-                "dispatch",
-                "retry"
-              ],
-              "query": []
-            }
-          }
-        }
-      ]
-    },
-    {
       "name": "Rides",
       "item": [
         {
@@ -2770,441 +3633,6 @@
                 "receipt"
               ],
               "query": []
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Notifications",
-      "item": [
-        {
-          "name": "POST /devices - Register this phone for push. The push token belongs to one user: registering it on another account moves it. Call again whenever the token changes; send deviceId so the old token is replaced",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/devices",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "devices"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"token\": \"fcm-device-token-from-firebase-sdk\",\n  \"platform\": \"android\",\n  \"deviceId\": \"device-123\",\n  \"appVersion\": \"1.0.0\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "DELETE /devices/{deviceId} - Stop push to this device (call on logout). Only your own devices",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/devices/{{deviceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "devices",
-                "{{deviceId}}"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "GET /notifications - In-app inbox, newest first. meta.unreadCount is the badge number",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/notifications",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notifications"
-              ],
-              "query": [
-                {
-                  "key": "unread",
-                  "value": "",
-                  "disabled": true
-                },
-                {
-                  "key": "page",
-                  "value": "1",
-                  "disabled": false
-                },
-                {
-                  "key": "limit",
-                  "value": "20",
-                  "disabled": false
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "POST /notifications/read - Mark notifications read: send { ids: [...] } or { all: true }",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/notifications/read",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notifications",
-                "read"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"all\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Payments",
-      "item": [
-        {
-          "name": "POST /bookings/{bookingId}/payments - Start paying a completed ride (or a late-cancel / no-show fee) online. The server sets the amount. Same Idempotency-Key, or a payment already under way, returns the same order. Pass checkout.key and checkout.orderId to the Razorpay screen",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Idempotency-Key",
-                "value": "pay-{{$guid}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/bookings/{{bookingId}}/payments",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "bookings",
-                "{{bookingId}}",
-                "payments"
-              ],
-              "query": []
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.collectionVariables.set('paymentId', pm.response.json().data.paymentId);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /payments/verify - After the Razorpay screen succeeds, send its orderId, paymentId and signature. Only a valid signature marks the booking paid (PAYMENT_SIGNATURE_INVALID otherwise). The webhook is the backup",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/payments/verify",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "payments",
-                "verify"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"orderId\": \"order_xxx\",\n  \"paymentId\": \"pay_xxx\",\n  \"signature\": \"hex-from-razorpay\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "GET /payments/{paymentId} - A payment attempt: status CREATED | PAID | FAILED | EXPIRED, amount, refunded amount",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/payments/{{paymentId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "payments",
-                "{{paymentId}}"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "GET /customers/me/balance - What the rider owes, per booking, whether each is overdue and payable, and whether new bookings are blocked (UNPAID_BALANCE)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/customers/me/balance",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "customers",
-                "me",
-                "balance"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "POST /dev/payments/{paymentId}/complete - DEVELOPMENT ONLY (mock payments, never in production): pretend the rider paid, through the same path as a real capture. Not present when real payments are on",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/dev/payments/{{paymentId}}/complete",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "dev",
-                "payments",
-                "{{paymentId}}",
-                "complete"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "POST /webhooks/razorpay - Razorpay calls this (not the apps). Signature checked on the raw body; each event id is processed once. payment.captured / order.paid, payment.failed, refund.processed, refund.failed",
-          "request": {
-            "method": "POST",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [
-              {
-                "key": "X-Razorpay-Signature",
-                "value": "hex hmac of the raw body"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/webhooks/razorpay",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "webhooks",
-                "razorpay"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "POST /rides/{rideId}/cash-collected - Driver confirms the rider paid the exact fare in cash (CASH bookings only). The cash is added to what the driver holds; too much cash takes them offline until they hand some in",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/rides/{{rideId}}/cash-collected",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rides",
-                "{{rideId}}",
-                "cash-collected"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"amountPaise\": 25000\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "POST /rides/{rideId}/cash-collection/customer-confirm - The rider says how much cash they handed to the driver (optional). It never moves money: the driver confirming the exact fare is what settles the ride. If the amount differs from the fare it is recorded as a cash dispute and audited for staff. Repeating the same amount is fine; a different amount afterwards is refused (409). Cash rides only, after the ride is completed, within 7 days",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/rides/{{rideId}}/cash-collection/customer-confirm",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "rides",
-                "{{rideId}}",
-                "cash-collection",
-                "customer-confirm"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"amountPaise\": 25000\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "GET /drivers/me/balance - Cash held, what the platform owes the driver, the net (positive = driver owes the platform), the cash limit, and any open settlement",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/me/balance",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "me",
-                "balance"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "GET /drivers/me/earnings - Per ride: charged, platform commission, and what the driver earned; plus totals for the period",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/me/earnings",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "me",
-                "earnings"
-              ],
-              "query": [
-                {
-                  "key": "from",
-                  "value": "",
-                  "disabled": true
-                },
-                {
-                  "key": "to",
-                  "value": "",
-                  "disabled": true
-                },
-                {
-                  "key": "page",
-                  "value": "1",
-                  "disabled": false
-                },
-                {
-                  "key": "limit",
-                  "value": "20",
-                  "disabled": false
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "GET /drivers/me/settlements - The driver's own settlements",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/drivers/me/settlements",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "drivers",
-                "me",
-                "settlements"
-              ],
-              "query": [
-                {
-                  "key": "status",
-                  "value": "",
-                  "disabled": true
-                },
-                {
-                  "key": "page",
-                  "value": "1",
-                  "disabled": false
-                },
-                {
-                  "key": "limit",
-                  "value": "20",
-                  "disabled": false
-                }
-              ]
             }
           }
         }
@@ -4920,88 +5348,6 @@
                   "language": "json"
                 }
               }
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Operations",
-      "item": [
-        {
-          "name": "GET /admin/system/health - What the monitor sees right now: ledger balanced, stuck searches, unanswered SOS, push backlog, unfinished webhooks, payments missing from the ledger, dead background jobs. Each check says OK or what to do",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/admin/system/health",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "admin",
-                "system",
-                "health"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "POST /admin/system/test-alert - Sends a harmless TEST ALERT through the real alert path (the log and, if ALERT_WEBHOOK_URL is set, the Slack/Discord webhook). Answers webhookConfigured and delivered (true only if the webhook accepted it). Use it after setting the webhook, and after any change to it. Audited",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/admin/system/test-alert",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "admin",
-                "system",
-                "test-alert"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "GET /admin/system/metrics - Request counts and speed per route (average and 95th percentile), status classes, server errors in the last 5 minutes, memory and event-loop lag for this server",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/admin/system/metrics",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "admin",
-                "system",
-                "metrics"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "GET /metrics - The same numbers as Prometheus text for a metrics tool. Not a staff login: send Authorization: Bearer <METRICS_TOKEN>. Returns 404 when no token is configured",
-          "request": {
-            "method": "GET",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/metrics",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "metrics"
-              ],
-              "query": []
             }
           }
         }

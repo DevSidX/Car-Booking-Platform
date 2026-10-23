@@ -29,6 +29,16 @@ export const markReadSchema = z
     path: ['ids'],
   });
 
+export const testNotificationSchema = z
+  .object({
+    channel: z.enum(['push', 'sms']),
+    recipientId: objectId,
+    title: z.string().trim().min(1).max(100).optional(),
+    body: z.string().trim().min(1).max(300),
+  })
+  .strict();
+
 export type RegisterDeviceInput = z.infer<typeof registerDeviceSchema>;
 export type NotificationListQuery = z.infer<typeof notificationListQuerySchema>;
 export type MarkReadInput = z.infer<typeof markReadSchema>;
+export type TestNotificationInput = z.infer<typeof testNotificationSchema>;

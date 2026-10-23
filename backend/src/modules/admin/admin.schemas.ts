@@ -39,8 +39,65 @@ export const expiringDocumentsQuerySchema = paginationSchema.extend({
   days: z.coerce.number().int().min(1).max(365).default(30),
 });
 
+export const bookingRestrictionSchema = z
+  .object({
+    action: z.enum(['RESTRICT', 'LIFT']),
+    reason: z.string().trim().min(3).max(300),
+  })
+  .strict();
+
+export const liveDriversQuerySchema = paginationSchema
+  .extend({
+    zoneId: objectId.optional(),
+    minLat: z.coerce.number().min(-90).max(90).optional(),
+    maxLat: z.coerce.number().min(-90).max(90).optional(),
+    minLng: z.coerce.number().min(-180).max(180).optional(),
+    maxLng: z.coerce.number().min(-180).max(180).optional(),
+  })
+  .refine(
+    (data) => {
+      const hasAnyBox =
+        data.minLat !== undefined ||
+        data.maxLat !== undefined ||
+        data.minLng !== undefined ||
+        data.maxLng !== undefined;
+      if (!hasAnyBox) return true;
+      return (
+        data.minLat !== undefined &&
+        data.maxLat !== undefined &&
+        data.minLng !== undefined &&
+        data.maxLng !== undefined &&
+        data.minLat <= data.maxLat &&
+        data.minLng <= data.maxLng &&
+        data.maxLat - data.minLat <= 5 &&
+        data.maxLng - data.minLng <= 5
+      );
+    },
+    {
+      message: 'Bounding box must have valid min/max coords with span <= 5 degrees',
+      path: ['minLat'],
+    },
+  );
+
+export const dispatchQueueQuerySchema = paginationSchema.extend({
+  zoneId: objectId.optional(),
+  categoryId: objectId.optional(),
+});
+
+export const manualAssignDriverSchema = z
+  .object({
+    driverId: objectId,
+    vehicleId: objectId.optional(),
+    reason: z.string().trim().min(3).max(300),
+  })
+  .strict();
+
 export type WaiveFeeInput = z.infer<typeof waiveFeeSchema>;
 export type ExpiringDocumentsQuery = z.infer<typeof expiringDocumentsQuerySchema>;
 export type UserListQuery = z.infer<typeof userListQuerySchema>;
 export type UserStatusInput = z.infer<typeof userStatusSchema>;
 export type BookingListQuery = z.infer<typeof bookingListQuerySchema>;
+export type BookingRestrictionInput = z.infer<typeof bookingRestrictionSchema>;
+export type LiveDriversQuery = z.infer<typeof liveDriversQuerySchema>;
+export type DispatchQueueQuery = z.infer<typeof dispatchQueueQuerySchema>;
+export type ManualAssignDriverInput = z.infer<typeof manualAssignDriverSchema>;

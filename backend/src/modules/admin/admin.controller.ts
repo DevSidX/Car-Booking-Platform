@@ -4,7 +4,11 @@ import { ok } from '../../common/response';
 import { objectId } from '../../common/zod';
 import {
   bookingListQuerySchema,
+  bookingRestrictionSchema,
+  dispatchQueueQuerySchema,
   expiringDocumentsQuerySchema,
+  liveDriversQuerySchema,
+  manualAssignDriverSchema,
   userListQuerySchema,
   userStatusSchema,
   waiveFeeSchema,
@@ -51,6 +55,33 @@ export function createAdminController(service: AdminService) {
     ok(res, items, 200, meta);
   };
 
+  const setCustomerBookingRestriction: RequestHandler = async (req, res) => {
+    const customerId = objectId.parse(req.params['customerId']);
+    const input = bookingRestrictionSchema.parse(req.body);
+    ok(res, await service.setCustomerBookingRestriction(actorFrom(req), customerId, input));
+  };
+
+  const liveDrivers: RequestHandler = async (req, res) => {
+    const { items, meta } = await service.getLiveDrivers(
+      actorFrom(req),
+      liveDriversQuerySchema.parse(req.query),
+    );
+    ok(res, items, 200, meta);
+  };
+
+  const dispatchQueue: RequestHandler = async (req, res) => {
+    const { items, meta } = await service.getDispatchQueue(
+      dispatchQueueQuerySchema.parse(req.query),
+    );
+    ok(res, items, 200, meta);
+  };
+
+  const assignDriver: RequestHandler = async (req, res) => {
+    const bookingId = String(req.params['bookingId']);
+    const input = manualAssignDriverSchema.parse(req.body);
+    ok(res, await service.manualAssignDriver(actorFrom(req), bookingId, input));
+  };
+
   const dashboard: RequestHandler = async (_req, res) => {
     ok(res, await service.dashboard());
   };
@@ -59,11 +90,15 @@ export function createAdminController(service: AdminService) {
     listUsers,
     userDetail,
     setUserStatus,
+    setCustomerBookingRestriction,
     listBookings,
     bookingDetail,
     rideTrail,
     waiveFee,
     expiringDocuments,
+    liveDrivers,
+    dispatchQueue,
+    assignDriver,
     dashboard,
   };
 }

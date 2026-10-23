@@ -31,5 +31,20 @@ export function adminRouter(ctx: ModuleContext, service: AdminService): Router {
   );
   r.get('/admin/documents/expiring', ...view, c.expiringDocuments);
 
+  r.post(
+    '/admin/customers/:customerId/restrictions',
+    ctx.authenticate,
+    requireRole(...USER_STATUS_ROLES),
+    c.setCustomerBookingRestriction,
+  );
+  r.get('/admin/drivers/live', ...view, c.liveDrivers);
+  r.get('/admin/dispatch/queue', ...view, c.dispatchQueue);
+  r.post(
+    '/admin/bookings/:bookingId/assign-driver',
+    ctx.authenticate,
+    requireRole(...USER_STATUS_ROLES),
+    c.assignDriver,
+  );
+
   return r;
 }

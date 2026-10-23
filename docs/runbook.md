@@ -125,3 +125,26 @@ Safety desk phone: ______  Finance: ______  Developer on call: ______  Razorpay 
 
 ## Rental or outstation fare dispute
 Receipt lines come from the stored final fare. The distance is `fare.measuredDistanceMeters` (server GPS trail) and the time is the server clock. A booking event `ODOMETER_MISMATCH` means the driver odometer readings disagreed with the trail by a lot; look at the trail before changing any amount. Corrections go through the normal credit and adjustment process.
+### `dispatch_queue_backlog` (Operations Action)
+Unassigned bookings are accumulating in the dispatch queue without driver acceptance.
+1. Inspect the queue: `GET /admin/dispatch/queue` (sorts oldest first, displays `waitingSeconds`).
+2. Check live fleet density around the affected zone: `GET /admin/drivers/live?zoneId=<zoneId>` or query bounding box coordinates.
+3. If drivers are nearby but not responding to broadcast offers, perform manual assignment:
+   `POST /admin/bookings/{bookingId}/assign-driver` with `{ "driverId": "<id>", "reason": "Dispatch queue timeout rescue" }`.
+4. If a driver reports a flat tyre or emergency after assignment, reassign immediately using the same endpoint; the previous driver's active ride lock is automatically released and recorded in previousDrivers.
+
+### `customer_abusive_booking_pattern` (Operations Action)
+A rider is repeatedly booking and cancelling, or engaging in fraudulent dispatch patterns.
+1. Apply a booking restriction rather than an account ban:
+   `POST /admin/customers/{customerId}/restrictions` with `{ "action": "RESTRICT", "reason": "Repeated malicious booking cancellations" }`.
+2. This stops new bookings with a 403 `BOOKING_RESTRICTED` error while preserving their account access, wallet balance, and ability to clear any unpaid dues.
+3. Once the situation is reviewed by safety operations, lift the restriction:
+   `POST /admin/customers/{customerId}/restrictions` with `{ "action": "LIFT", "reason": "Rider safety review completed" }`.
+4. Lifting the restriction restores booking privileges without altering independent suspensions or unpaid-balance debt rules.
+
+### `test_notification_diagnostics` (Operations Action)
+Diagnosing push notification or SMS deliverability issues reported by drivers or customers.
+1. Send an audited test message: `POST /admin/notifications/test` with `{ "channel": "push", "recipientId": "<userId>", "title": "Test Alert", "body": "Diagnostic message" }`.
+2. Inspect the returned `outcome` (`delivered`, `queued`, `failed`).
+3. If SMS fails, verify whether the phone is on the national DND registry or if the SMS provider quota has been exhausted.
+4. Each staff member is rate limited to 10 test notifications per minute to prevent accidental spamming.
