@@ -25,6 +25,14 @@
     "loadtest": "tsx scripts/loadtest.ts",
     "loadtest:rides": "tsx scripts/loadtest-rides.ts",
     "loadtest:local": "tsx scripts/localstack.ts",
+    "verify:live": "tsx src/tools/verifyLiveRun.ts",
+    "verify:live:prod": "node dist/tools/verifyLiveRun.js",
+    "backup": "tsx src/tools/backupRun.ts",
+    "backup:prod": "node dist/tools/backupRun.js",
+    "uploads:sweep": "tsx src/tools/uploadSweepRun.ts",
+    "uploads:sweep:prod": "node dist/tools/uploadSweepRun.js",
+    "preflight": "tsx src/tools/preflightRun.ts",
+    "preflight:prod": "node dist/tools/preflightRun.js",
     "gate": "vitest run --maxWorkers=3 tests/gate.test.ts tests/rbac-matrix.test.ts tests/security.test.ts tests/security-limits.test.ts tests/dispatch-race.test.ts tests/rides.test.ts tests/finance-payments.test.ts tests/finance-ledger.test.ts tests/finance-cash.test.ts tests/tips-wallet.test.ts tests/payouts.test.ts tests/safety.test.ts tests/authz.test.ts tests/contract.test.ts tests/monitor.test.ts"
   },
   "dependencies": {
