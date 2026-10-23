@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { DocumentTypes, DriverApprovalStatuses } from '../../common/enums';
+import { DocumentTypes, DriverApprovalStatuses, UPLOAD_TYPES } from '../../common/enums';
 import { paginationSchema } from '../../common/pagination';
 
-export const UPLOAD_TYPES = ['image/jpeg', 'image/png', 'application/pdf'] as const;
+export { UPLOAD_TYPES };
 
 export const applicationSchema = z
   .object({ fullName: z.string().trim().min(2).max(100), city: z.string().trim().min(2).max(80) })

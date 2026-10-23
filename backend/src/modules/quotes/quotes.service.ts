@@ -96,8 +96,11 @@ export function createQuotesService(deps: {
   outstationMaxDays: number;
   /** Limits for rides booked for later. */
   schedule: { minLeadMs: number; maxAheadMs: number };
+  /** Tax added on top of every fare, in basis points (500 = 5%). 0 or missing = none. */
+  taxBp?: number;
 }) {
   const { zones, pricing, maps, now, coupons, schedule, trips } = deps;
+  const taxBp = deps.taxBp ?? 0;
 
   /** A ride for later must be neither too soon nor too far ahead. */
   function assertSchedulable(at: Date) {
@@ -163,14 +166,14 @@ export function createQuotesService(deps: {
       extraKmPaise: pkg.extraKmPaise,
       extraHourPaise: pkg.extraHourPaise,
     };
-    const fare = rentalEstimate(snapshot);
+    const fare = rentalEstimate(snapshot, taxBp);
     const applied = input.couponCode
       ? await coupons.evaluate(role, {
           code: input.couponCode,
           userId: customerId,
           zoneId: pickup.zone._id,
           categoryId: category._id,
-          estimatedFarePaise: fare.breakdown.estimatedTotalPaise,
+          estimatedFarePaise: fare.breakdown.estimatedTotalPaise - fare.breakdown.taxPaise,
         })
       : null;
     return FareQuote.create({
@@ -191,6 +194,7 @@ export function createQuotesService(deps: {
       durationSeconds: snapshot.hours * 3600,
       breakdown: fare.breakdown,
       estimatedTotalPaise: fare.breakdown.estimatedTotalPaise,
+      taxBp,
       ...(applied ? { coupon: applied.snapshot, discountPaise: applied.discountPaise } : {}),
       ...(input.scheduledFor ? { scheduledFor: input.scheduledFor } : {}),
       expiresAt: quoteWindow(),
@@ -264,14 +268,14 @@ export function createQuotesService(deps: {
       minimumFarePaise: rate.minimumFarePaise,
       estimatedKm: trip.tripType === 'ROUND_TRIP' ? routeKm * 2 : routeKm,
     };
-    const fare = outstationEstimate(snapshot);
+    const fare = outstationEstimate(snapshot, taxBp);
     const applied = input.couponCode
       ? await coupons.evaluate(role, {
           code: input.couponCode,
           userId: customerId,
           zoneId: pickup.zone._id,
           categoryId: category._id,
-          estimatedFarePaise: fare.breakdown.estimatedTotalPaise,
+          estimatedFarePaise: fare.breakdown.estimatedTotalPaise - fare.breakdown.taxPaise,
         })
       : null;
     return FareQuote.create({
@@ -288,6 +292,7 @@ export function createQuotesService(deps: {
       durationSeconds: route.durationSeconds,
       breakdown: fare.breakdown,
       estimatedTotalPaise: fare.breakdown.estimatedTotalPaise,
+      taxBp,
       ...(applied ? { coupon: applied.snapshot, discountPaise: applied.discountPaise } : {}),
       ...(input.scheduledFor ? { scheduledFor: input.scheduledFor } : {}),
       expiresAt: quoteWindow(),
@@ -358,6 +363,8 @@ export function createQuotesService(deps: {
       },
       route.distanceMeters,
       route.durationSeconds,
+      undefined,
+      taxBp,
     );
 
     // A coupon is checked now (so the rider sees the price they will pay) and frozen on the quote.
@@ -367,7 +374,7 @@ export function createQuotesService(deps: {
           userId: customerId,
           zoneId: pickup.zone._id,
           categoryId: category._id,
-          estimatedFarePaise: breakdown.estimatedTotalPaise,
+          estimatedFarePaise: breakdown.estimatedTotalPaise - breakdown.taxPaise,
         })
       : null;
 
@@ -385,6 +392,7 @@ export function createQuotesService(deps: {
       durationSeconds: route.durationSeconds,
       breakdown,
       estimatedTotalPaise: breakdown.estimatedTotalPaise,
+      taxBp,
       ...(applied ? { coupon: applied.snapshot, discountPaise: applied.discountPaise } : {}),
       ...(input.scheduledFor ? { scheduledFor: input.scheduledFor } : {}),
       expiresAt: new Date(at.getTime() + QUOTE_TTL_MS),

@@ -14,6 +14,11 @@ export const cashCollectedSchema = z
   .object({ amountPaise: z.number().int().min(1).max(10_000_000) })
   .strict();
 
+/** The rider's side of a cash payment: how much they say they handed to the driver. */
+export const customerCashConfirmSchema = z
+  .object({ amountPaise: z.number().int().min(1).max(10_000_000) })
+  .strict();
+
 export const cashDepositSchema = z
   .object({
     amountPaise: z.number().int().min(1).max(100_000_000),
@@ -22,7 +27,11 @@ export const cashDepositSchema = z
   .strict();
 
 export type CashCollectedInput = z.infer<typeof cashCollectedSchema>;
+export type CustomerCashConfirmInput = z.infer<typeof customerCashConfirmSchema>;
 export type CashDepositInput = z.infer<typeof cashDepositSchema>;
+
+/** A rider may acknowledge cash for a week after the ride. */
+const CONFIRM_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function createCashService(deps: {
   ledger: LedgerService;
@@ -133,6 +142,68 @@ export function createCashService(deps: {
         netOwedToPlatformPaise: standing.netOwedByDriverPaise,
         limitPaise: standing.limitPaise,
         overLimit: standing.overLimit,
+      };
+    },
+
+    /**
+     * The rider acknowledges the cash they handed over. This never moves money: the driver's
+     * confirmation is what settles the ride. If the rider's amount differs from the fare, the
+     * difference is recorded as a cash dispute (and audited) for staff to look at.
+     * Repeating the same amount is safe; a different amount after that is refused.
+     */
+    async customerConfirm(actor: Actor, ridePublicId: string, input: CustomerCashConfirmInput) {
+      const ride = await Ride.findOne({ publicId: ridePublicId, customerId: actor.userId }).lean();
+      if (!ride) throw new AppError('NOT_FOUND', 'Ride not found.');
+      const booking = await Booking.findById(ride.bookingId);
+      if (!booking || !booking.customerId.equals(actor.userId)) {
+        throw new AppError('NOT_FOUND', 'Ride not found.');
+      }
+      if (booking.status !== 'COMPLETED' || !booking.finalFarePaise) {
+        throw new AppError(
+          'RIDE_INVALID_STATE',
+          'Cash can only be confirmed once the ride is completed.',
+        );
+      }
+      if (booking.paymentMethod !== 'CASH') {
+        throw new AppError('CONFLICT', 'This ride is paid online, not in cash.');
+      }
+      const completedAt = booking.completedAt ?? ride.completedAt;
+      if (completedAt && now().getTime() - completedAt.getTime() > CONFIRM_WINDOW_MS) {
+        throw new AppError('UNPROCESSABLE', 'This ride ended too long ago to confirm cash.');
+      }
+
+      const matchesFare = input.amountPaise === booking.finalFarePaise;
+      const t = now();
+      const first = await Booking.findOneAndUpdate(
+        { _id: booking._id, customerCashConfirmation: { $exists: false } },
+        { customerCashConfirmation: { amountPaise: input.amountPaise, at: t, matchesFare } },
+        { returnDocument: 'after' },
+      );
+      const current = first?.customerCashConfirmation ?? booking.customerCashConfirmation;
+      if (!first) {
+        if (!current || current.amountPaise !== input.amountPaise) {
+          throw new AppError('CONFLICT', 'You have already confirmed a different amount.');
+        }
+      } else if (!matchesFare) {
+        await audit.record(actor, {
+          action: 'cash.customer_mismatch',
+          targetType: 'Booking',
+          targetId: booking.id,
+          metadata: {
+            ridePublicId,
+            farePaise: booking.finalFarePaise,
+            riderSaysPaise: input.amountPaise,
+          },
+        });
+      }
+      return {
+        rideId: ride.publicId,
+        bookingId: booking.publicId,
+        farePaise: booking.finalFarePaise,
+        confirmedPaise: current!.amountPaise,
+        matchesFare: current!.matchesFare,
+        // Has the driver recorded the cash yet? Until then the ride is still unpaid.
+        driverRecordedCash: booking.paymentStatus === 'PAID' && /^CASH:/.test(booking.paidBy ?? ''),
       };
     },
 

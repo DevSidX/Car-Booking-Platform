@@ -359,6 +359,7 @@ export function createBookingsService(deps: {
             configVersion: quote.configVersion,
             estimatedDistanceMeters: quote.distanceMeters,
             estimatedDurationSeconds: quote.durationSeconds,
+            taxBp: quote.taxBp ?? 0,
             breakdown: quote.breakdown,
           },
           notes: input.notes,

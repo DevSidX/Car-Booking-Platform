@@ -26,13 +26,14 @@ export type FareBreakdown = {
 /**
  * Pure fare estimate. Everything is integer paise; each component is rounded once.
  * Waiting is billed only when the caller passes the (server-measured) billable waiting seconds.
- * Tolls, demand adjustment, discounts and tax are 0 until their phases land.
+ * Tolls, demand adjustment and discounts are 0 until their phases land. Tax is added on top when taxBp is set.
  */
 export function calculateFare(
   rates: FareRates,
   distanceMeters: number,
   durationSeconds: number,
   waiting?: { billableSeconds: number; perMinutePaise: number },
+  taxBp = 0,
 ): FareBreakdown {
   if (
     !Number.isFinite(distanceMeters) ||
@@ -53,19 +54,36 @@ export function calculateFare(
   const total =
     rates.roundingMode === 'NEAREST_RUPEE' ? roundToRupee(beforeRounding) : beforeRounding;
 
-  return {
-    baseFarePaise: rates.baseFarePaise,
-    distanceFarePaise,
-    timeFarePaise,
-    waitingFarePaise,
-    tollEstimatePaise: 0,
-    demandAdjustmentPaise: 0,
-    discountPaise: 0,
-    taxPaise: 0,
-    minimumFareAdjustmentPaise,
-    roundingAdjustmentPaise: total - beforeRounding,
-    estimatedTotalPaise: total,
-  };
+  return withTax(
+    {
+      baseFarePaise: rates.baseFarePaise,
+      distanceFarePaise,
+      timeFarePaise,
+      waitingFarePaise,
+      tollEstimatePaise: 0,
+      demandAdjustmentPaise: 0,
+      discountPaise: 0,
+      taxPaise: 0,
+      minimumFareAdjustmentPaise,
+      roundingAdjustmentPaise: total - beforeRounding,
+      estimatedTotalPaise: total,
+    },
+    taxBp,
+  );
+}
+
+/**
+ * Tax (GST) added ON TOP of a fare: `taxBp` basis points (500 = 5%) of the fare before tax, in whole
+ * paise and exact (never rounded to a rupee, so the tax line is what is reported to the tax office).
+ * `estimatedTotalPaise` becomes what the rider pays, tax included. 0 = no tax.
+ */
+export function withTax<T extends { taxPaise: number; estimatedTotalPaise: number }>(
+  breakdown: T,
+  taxBp: number,
+): T {
+  if (!taxBp) return breakdown;
+  const taxPaise = Math.round((breakdown.estimatedTotalPaise * taxBp) / 10_000);
+  return { ...breakdown, taxPaise, estimatedTotalPaise: breakdown.estimatedTotalPaise + taxPaise };
 }
 
 export type WaitingSummary = {

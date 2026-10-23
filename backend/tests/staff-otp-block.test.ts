@@ -4,6 +4,7 @@ import { loadEnv } from '../src/config/env';
 import { User } from '../src/modules/users/user.model';
 import { loginAs, nextPhone, startTestEnv, type TestEnv } from './helpers';
 import { normalizePhone } from '../src/common/phone';
+import { allRealDrivers } from './liveEnv';
 
 /** The production setting: staff may not sign in with a phone code. */
 let env: TestEnv;
@@ -38,9 +39,9 @@ describe('start-up', () => {
     JWT_REFRESH_SECRET: 'b'.repeat(32),
   };
   const production = {
+    ...allRealDrivers,
     ...base,
     NODE_ENV: 'production',
-    PROVIDER_MODE: 'live',
     REDIS_URL: 'redis://x:6379',
   };
 

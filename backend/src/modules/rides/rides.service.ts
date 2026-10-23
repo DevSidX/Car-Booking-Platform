@@ -25,7 +25,8 @@ import { FareConfig } from '../pricing/fareConfig.model';
 import { MAX_TRIP_METERS, MIN_TRIP_METERS, type QuotesService } from '../quotes/quotes.service';
 import { routeThrough } from '../quotes/route';
 import { Ride } from './ride.model';
-import { trailMeters } from '../trips/tripDistance';
+import { reconcileCityDistance, type CityDistanceResult } from '../trips/cityDistance';
+import { trailMeters, trailSummary } from '../trips/tripDistance';
 import {
   outstationFinal,
   rentalFinal,
@@ -439,6 +440,8 @@ export function createRidesService(deps: {
         configVersion?: number;
         estimatedDistanceMeters: number;
         estimatedDurationSeconds: number;
+        /** Tax rate frozen on the quote, in basis points. */
+        taxBp?: number;
         breakdown: { estimatedTotalPaise: number };
       };
       const measured = secondsBetween(ride.startedAt, t);
@@ -483,6 +486,7 @@ export function createRidesService(deps: {
           rentalGraceMinutes: config.rentalGraceMinutes,
           rentalGraceKm: config.rentalGraceKm,
           oneWayDetourBp: config.oneWayDetourBp,
+          taxBp: snapshot.taxBp ?? 0,
         };
         const f =
           tripKind === 'RENTAL'
@@ -528,14 +532,48 @@ export function createRidesService(deps: {
         }
       }
 
+      // City rides: weigh the quoted distance against where the car really went (server GPS trail).
+      let cityDistance: CityDistanceResult | null = null;
+      if (!tripFinal && cfg) {
+        const [pickupLng, pickupLat] = booking.pickup.location!.coordinates as [number, number];
+        const trail = await trailSummary(booking._id, {
+          start: { lat: pickupLat, lng: pickupLng, at: ride.startedAt },
+          maxSpeedMps: config.maxSpeedMps,
+          maxAccuracyMeters: config.maxAccuracyMeters,
+          bookingStatus: 'IN_PROGRESS',
+        }).catch(() => ({ meters: 0, pings: 0 })); // a trail problem must never stop a ride from ending
+        cityDistance = reconcileCityDistance(
+          {
+            quotedMeters: snapshot.estimatedDistanceMeters,
+            measuredMeters: trail.meters,
+            pings: trail.pings,
+          },
+          {
+            mode: config.cityDistanceBilling,
+            detourBp: config.cityDetourBp,
+            shortBp: config.cityShortBp,
+            floorBp: config.cityFloorBp,
+            ceilingBp: config.cityCeilingBp,
+            minPings: config.cityMinPings,
+            flagBp: config.cityFlagBp,
+          },
+        );
+      }
+
       const finalFare = tripFinal
         ? tripFinal
         : cfg
           ? {
               currency: snapshot.currency ?? 'INR',
               configVersion: cfg.version,
-              basis: 'QUOTED_DISTANCE_MEASURED_TIME',
-              billableDistanceMeters: snapshot.estimatedDistanceMeters,
+              basis:
+                cityDistance!.basis === 'QUOTED'
+                  ? 'QUOTED_DISTANCE_MEASURED_TIME'
+                  : 'MEASURED_DISTANCE_AND_TIME',
+              billableDistanceMeters: cityDistance!.billableMeters,
+              quotedDistanceMeters: snapshot.estimatedDistanceMeters,
+              measuredDistanceMeters: cityDistance!.measuredMeters,
+              distanceBasis: cityDistance!.basis,
               billableDurationSeconds: billableDuration,
               measuredDurationSeconds: measured,
               waiting: { ...waiting, ratePerMinutePaise: cfg.waitingPerMinutePaise ?? 0 },
@@ -547,12 +585,13 @@ export function createRidesService(deps: {
                   minimumFarePaise: cfg.minimumFarePaise,
                   roundingMode: (cfg.roundingMode ?? 'NEAREST_RUPEE') as 'NEAREST_RUPEE' | 'NONE',
                 },
-                snapshot.estimatedDistanceMeters,
+                cityDistance!.billableMeters,
                 billableDuration,
                 {
                   billableSeconds: waiting.billableSeconds,
                   perMinutePaise: cfg.waitingPerMinutePaise ?? 0,
                 },
+                snapshot.taxBp ?? 0,
               ),
             }
           : {
@@ -568,10 +607,17 @@ export function createRidesService(deps: {
             };
       // The full fare is what the driver's pay and the platform's cut are based on. A coupon (rule
       // frozen at booking) lowers only what the RIDER owes; the platform funds the difference.
-      const grossFarePaise = (
-        finalFare['breakdown' as keyof typeof finalFare] as { estimatedTotalPaise: number }
-      ).estimatedTotalPaise;
-      const discountPaise = booking.coupon ? computeDiscount(booking.coupon, grossFarePaise) : 0;
+      // The gross fare is what the rider would pay without a coupon: the fare plus tax. Tax is the
+      // government's, so the driver's pay, the commission and the coupon are all worked out on the fare before tax.
+      const finalBreakdown = finalFare['breakdown' as keyof typeof finalFare] as {
+        estimatedTotalPaise: number;
+        taxPaise?: number;
+      };
+      const grossFarePaise = finalBreakdown.estimatedTotalPaise;
+      const taxPaise = finalBreakdown.taxPaise ?? 0;
+      const discountPaise = booking.coupon
+        ? computeDiscount(booking.coupon, grossFarePaise - taxPaise)
+        : 0;
       const finalFarePaise = grossFarePaise - discountPaise;
       Object.assign(finalFare, {
         grossFarePaise,
@@ -590,6 +636,7 @@ export function createRidesService(deps: {
             paymentStatus: booking.paymentMethod === 'CORPORATE' ? 'BILLED' : 'DUE',
             finalFarePaise,
             grossFarePaise,
+            taxPaise,
             discountPaise,
             finalFare,
             'receipt.number': publicId('rcpt'),
@@ -626,6 +673,21 @@ export function createRidesService(deps: {
         at: t,
         metadata: { finalFarePaise },
       });
+      if (cityDistance?.mismatch) {
+        // For staff: the trail and the quote disagree by a lot. Nothing is changed by this alone.
+        await record({
+          bookingId: booking._id,
+          type: 'DISTANCE_MISMATCH',
+          actorType: 'SYSTEM',
+          at: t,
+          metadata: {
+            quotedMeters: snapshot.estimatedDistanceMeters,
+            measuredMeters: cityDistance.measuredMeters,
+            billedMeters: cityDistance.billableMeters,
+            basis: cityDistance.basis,
+          },
+        });
+      }
       await ledger.accrueRideSafe(booking._id);
       return {
         rideId: ride.publicId,
@@ -635,6 +697,7 @@ export function createRidesService(deps: {
         fare: finalFare,
         finalFarePaise,
         grossFarePaise,
+        taxPaise,
         discountPaise,
         receiptNumber: moved.receipt?.number ?? null,
       };
@@ -943,6 +1006,8 @@ export function createRidesService(deps: {
         },
         route.distanceMeters,
         route.durationSeconds,
+        undefined,
+        (booking.fareSnapshot as { taxBp?: number } | undefined)?.taxBp ?? 0,
       );
 
       const t = now();

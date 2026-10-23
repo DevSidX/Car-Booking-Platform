@@ -60,6 +60,8 @@ async function main(): Promise<void> {
       autoPayouts: env.AUTO_PAYOUTS,
       invoiceTaxBp: env.INVOICE_TAX_BP,
       invoiceTaxLabel: env.INVOICE_TAX_LABEL,
+      rideTaxBp: env.RIDE_TAX_BP,
+      commissionTaxBp: env.COMMISSION_TAX_BP,
       seller: {
         name: env.SELLER_NAME,
         gstin: env.SELLER_GSTIN ?? null,

@@ -1,3 +1,4 @@
+import { AuditLog } from '../src/modules/audit/auditLog.model';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createLogger } from '../src/common/logger';
@@ -106,6 +107,24 @@ describe('system health', () => {
   });
 });
 
+describe('test alert endpoint', () => {
+  it('is for operations only, is audited, and says whether a webhook is configured', async () => {
+    const ops = await loginAsAdmin(env, nextPhone(), 'OPS');
+    const support = await loginAsAdmin(env, nextPhone(), 'SUPPORT');
+    const rider = await loginAs(env, nextPhone(), 'CUSTOMER');
+    expect((await api().post('/api/v1/admin/system/test-alert').set(rider.auth)).status).toBe(403);
+    expect((await api().post('/api/v1/admin/system/test-alert').set(support.auth)).status).toBe(
+      403,
+    );
+    expect((await api().post('/api/v1/admin/system/test-alert')).status).toBe(401);
+    const res = await api().post('/api/v1/admin/system/test-alert').set(ops.auth);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    // The test server has no webhook configured.
+    expect(res.body.data).toEqual({ webhookConfigured: false, delivered: false });
+    expect(await AuditLog.countDocuments({ action: 'system.test_alert' })).toBe(1);
+  });
+});
+
 describe('alerts', () => {
   function build(
     sent: { url: string; text: string }[],
@@ -169,6 +188,45 @@ describe('alerts', () => {
     expect(sent[0]!.text).toContain('finance repair');
     m.recordJob('finance repair', 60_000, true);
     expect((await m.run()).recovered).toEqual(['jobs_alive']);
+  });
+
+  it('the test alert reaches the webhook and says so; a refusing or missing webhook says delivered: false', async () => {
+    const mk = (fetchFn?: typeof fetch, url: string | null = 'https://hooks.example.com/abc') =>
+      createMonitorService({
+        ledger: {
+          checkBalance: async () => ({
+            ledgerTotalPaise: 0,
+            unbalancedTransactions: [],
+            completedRidesWithoutAccrual: 0,
+          }),
+        },
+        logger: createLogger('silent'),
+        now: () => new Date('2026-10-23T10:00:00Z'),
+        alertWebhookUrl: url ?? undefined,
+        environment: 'staging',
+        ...(fetchFn ? { fetchFn } : {}),
+      });
+    const sent: string[] = [];
+    const accepted = mk((async (_u: string, init: { body: string }) => {
+      sent.push(JSON.parse(init.body).text);
+      return new Response('ok', { status: 200 });
+    }) as unknown as typeof fetch);
+    expect(await accepted.testAlert()).toEqual({ webhookConfigured: true, delivered: true });
+    expect(sent[0]).toMatch(/^\[staging\] TEST ALERT: nothing is wrong/);
+
+    // A deleted Slack hook answers 404: that is not a delivered alert.
+    const refused = mk(
+      (async () => new Response('no_service', { status: 404 })) as unknown as typeof fetch,
+    );
+    expect(await refused.testAlert()).toEqual({ webhookConfigured: true, delivered: false });
+    const down = mk((async () => {
+      throw new Error('network down');
+    }) as unknown as typeof fetch);
+    expect(await down.testAlert()).toEqual({ webhookConfigured: true, delivered: false });
+    expect(await mk(undefined, null).testAlert()).toEqual({
+      webhookConfigured: false,
+      delivered: false,
+    });
   });
 
   it('a dead alert webhook never breaks monitoring', async () => {

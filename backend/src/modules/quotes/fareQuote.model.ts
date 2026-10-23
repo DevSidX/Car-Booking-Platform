@@ -50,6 +50,8 @@ const fareQuoteSchema = new Schema(
     durationSeconds: { type: Number, required: true },
     breakdown: { type: Schema.Types.Mixed, required: true },
     estimatedTotalPaise: { type: Number, required: true },
+    // Tax rate (basis points) used for this quote, frozen so the booking and final fare use the same one.
+    taxBp: { type: Number, default: 0 },
     currency: { type: String, default: 'INR' },
     expiresAt: { type: Date, required: true },
     usedAt: { type: Date, default: null },

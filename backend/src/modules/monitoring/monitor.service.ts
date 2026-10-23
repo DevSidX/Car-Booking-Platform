@@ -240,19 +240,27 @@ export function createMonitorService(deps: {
 
   const startedAt = now().getTime();
 
-  async function notify(text: string) {
+  /** Log the alert and send it to the webhook. True only when the webhook accepted it. */
+  async function notify(text: string): Promise<boolean> {
     logger.error({ alert: true }, text);
-    if (!deps.alertWebhookUrl) return;
+    if (!deps.alertWebhookUrl) return false;
     try {
-      await doFetch(deps.alertWebhookUrl, {
+      const res = await doFetch(deps.alertWebhookUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text: `[${deps.environment ?? 'cab-booking'}] ${text}` }),
         signal: AbortSignal.timeout(5000),
       });
+      // A deleted or wrong webhook answers with an error status: that is not a delivered alert.
+      if (!res.ok) {
+        logger.warn({ status: res.status }, 'the alert webhook refused the message');
+        return false;
+      }
+      return true;
     } catch {
       // The log line above is the fallback; never let a dead webhook break the monitor.
       logger.warn('could not deliver an alert to the webhook');
+      return false;
     }
   }
 
@@ -267,6 +275,14 @@ export function createMonitorService(deps: {
     },
 
     checks,
+
+    /** Sends a harmless test message through the real alert path, so the channel can be proven before it is needed. */
+    async testAlert(): Promise<{ webhookConfigured: boolean; delivered: boolean }> {
+      const delivered = await notify(
+        `TEST ALERT: nothing is wrong. Sent by staff at ${now().toISOString()} to prove alerts reach this channel.`,
+      );
+      return { webhookConfigured: Boolean(deps.alertWebhookUrl), delivered };
+    },
 
     async report() {
       const list = await checks();

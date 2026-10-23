@@ -85,3 +85,6 @@ export const OPS_ROOM_ROLES: Role[] = ['OPS', 'SUPPORT', 'SAFETY_ADMIN', 'SUPER_
 export const FEE_WAIVE_ROLES: Role[] = ['OPS', 'SUPER_ADMIN'];
 /** Staff who may suspend or reactivate customer accounts. */
 export const USER_STATUS_ROLES: Role[] = ['OPS', 'SUPER_ADMIN'];
+
+/** Content types a driver document may have. Shared by validation and file storage. */
+export const UPLOAD_TYPES = ['image/jpeg', 'image/png', 'application/pdf'] as const;

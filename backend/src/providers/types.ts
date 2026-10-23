@@ -2,14 +2,36 @@
 
 export type LatLng = { lat: number; lng: number };
 
+export type RouteResult = {
+  distanceMeters: number;
+  durationSeconds: number;
+  /** Google "encoded polyline" of the road path, for drawing a preview. Not always available. */
+  polyline?: string | undefined;
+};
+
+export type PlaceSuggestion = {
+  placeId: string;
+  /** Full text to show, e.g. "Connaught Place, New Delhi, Delhi, India". */
+  description: string;
+  mainText: string;
+  secondaryText: string;
+};
+
 export interface MapsProvider {
   /** Road distance/duration between two points. */
-  route(
-    origin: LatLng,
-    destination: LatLng,
-  ): Promise<{ distanceMeters: number; durationSeconds: number }>;
+  route(origin: LatLng, destination: LatLng): Promise<RouteResult>;
   geocode(address: string): Promise<LatLng | null>;
   reverseGeocode(point: LatLng): Promise<string | null>;
+  /** Address suggestions while the user types. `sessionToken` groups one search for billing. */
+  autocomplete(
+    input: string,
+    options?: { sessionToken?: string | undefined; near?: LatLng | undefined },
+  ): Promise<PlaceSuggestion[]>;
+  /** The coordinates and address of a suggestion the user picked. Null if the place is unknown. */
+  place(
+    placeId: string,
+    options?: { sessionToken?: string | undefined },
+  ): Promise<{ point: LatLng; address: string; name: string } | null>;
 }
 
 export interface SmsProvider {

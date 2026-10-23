@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
+import { actorFrom } from '../../common/actor';
 import { AppError } from '../../common/errors';
 import { h } from '../../common/route';
 import { requireRole } from '../../middleware/auth';
@@ -30,6 +31,19 @@ export function monitorRouter(
     '/admin/system/health',
     ...ops,
     h(async () => ({ data: await monitor.report() })),
+  );
+  // Proves the alert channel works (and who tested it).
+  r.post(
+    '/admin/system/test-alert',
+    ...ops,
+    h(async (req) => {
+      await ctx.audit.record(actorFrom(req), {
+        action: 'system.test_alert',
+        targetType: 'System',
+        targetId: 'alerts',
+      });
+      return { data: await monitor.testAlert() };
+    }),
   );
   r.get(
     '/admin/system/metrics',

@@ -197,6 +197,10 @@ export function createBalancesService(deps: {
           grossFarePaise: b.accrual!.grossPaise ?? b.accrual!.amountPaise,
           discountPaise: b.accrual!.discountPaise ?? 0,
           commissionPaise: b.accrual!.commissionPaise,
+          // Tax the rider paid on top of the fare (not part of the driver's pay), and the tax on the
+          // commission that was taken out of the driver's share.
+          taxPaise: b.accrual!.taxPaise ?? 0,
+          commissionTaxPaise: b.accrual!.commissionTaxPaise ?? 0,
           earningsPaise: b.accrual!.driverSharePaise,
           paymentMethod: b.paymentMethod,
           paymentStatus: b.paymentStatus,

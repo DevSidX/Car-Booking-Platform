@@ -1,4 +1,5 @@
 import { roundToRupee } from '../../common/geo';
+import { withTax } from '../pricing/fare';
 
 /**
  * Fares for rentals and outstation trips. Pure functions: no database, no clock. Every number is
@@ -37,6 +38,8 @@ export type TripRules = {
   rentalGraceMinutes: number;
   /** ...and this many km over its included distance. */
   rentalGraceKm: number;
+  /** Tax added on top of the fare, in basis points (500 = 5%). 0 or missing = none. */
+  taxBp?: number;
   /** One way: only if the real distance is this much more than quoted (basis points over, 2000 = 20%) is the real distance charged. */
   oneWayDetourBp: number;
 };
@@ -67,6 +70,11 @@ export type TripFare = {
   billableDurationSeconds: number;
 };
 
+/** The same fare with tax added on top (see withTax). */
+function taxed(fare: TripFare, taxBp: number | undefined): TripFare {
+  return taxBp ? { ...fare, breakdown: withTax(fare.breakdown, taxBp) } : fare;
+}
+
 const zeroes = {
   waitingFarePaise: 0,
   tollEstimatePaise: 0,
@@ -88,7 +96,7 @@ const rupees = (paise: number) => `₹${(paise / 100).toFixed(0)}`;
 /* ---------------- rentals ---------------- */
 
 /** What a rental costs if nothing goes over: the package price. */
-export function rentalEstimate(s: RentalSnapshot): TripFare {
+function rentalEstimatePlain(s: RentalSnapshot): TripFare {
   return {
     breakdown: {
       baseFarePaise: s.pricePaise,
@@ -108,7 +116,7 @@ export function rentalEstimate(s: RentalSnapshot): TripFare {
 }
 
 /** What a finished rental costs: the package plus time and distance over it. */
-export function rentalFinal(
+function rentalFinalPlain(
   s: RentalSnapshot,
   usage: { elapsedSeconds: number; measuredMeters: number },
   rules: TripRules,
@@ -203,7 +211,7 @@ function outstationFare(
 }
 
 /** What an outstation trip is expected to cost, from the route distance and the dates. */
-export function outstationEstimate(s: OutstationSnapshot): TripFare {
+function outstationEstimatePlain(s: OutstationSnapshot): TripFare {
   const billableKm =
     s.tripType === 'ROUND_TRIP'
       ? Math.max(s.estimatedKm, s.minKmPerDay * s.days)
@@ -212,7 +220,7 @@ export function outstationEstimate(s: OutstationSnapshot): TripFare {
 }
 
 /** What a finished outstation trip costs, from the distance and days actually used. */
-export function outstationFinal(
+function outstationFinalPlain(
   s: OutstationSnapshot,
   usage: { startedAt: Date; endedAt: Date; measuredMeters: number },
   rules: TripRules,
@@ -231,3 +239,27 @@ export function outstationFinal(
   const billableKm = Math.max(actualKm, s.minKmPerDay * days);
   return outstationFare(billableKm, days - 1, days, s, elapsed, usage.measuredMeters);
 }
+
+/* ---------------- with tax on top ---------------- */
+
+/** What a rental costs if nothing goes over: the package price, plus tax if `taxBp` is set. */
+export const rentalEstimate = (s: RentalSnapshot, taxBp = 0): TripFare =>
+  taxed(rentalEstimatePlain(s), taxBp);
+
+/** What a finished rental costs, plus tax if `rules.taxBp` is set. */
+export const rentalFinal = (
+  s: RentalSnapshot,
+  usage: { elapsedSeconds: number; measuredMeters: number },
+  rules: TripRules,
+): TripFare => taxed(rentalFinalPlain(s, usage, rules), rules.taxBp);
+
+/** What an outstation trip is expected to cost, plus tax if `taxBp` is set. */
+export const outstationEstimate = (s: OutstationSnapshot, taxBp = 0): TripFare =>
+  taxed(outstationEstimatePlain(s), taxBp);
+
+/** What a finished outstation trip costs, plus tax if `rules.taxBp` is set. */
+export const outstationFinal = (
+  s: OutstationSnapshot,
+  usage: { startedAt: Date; endedAt: Date; measuredMeters: number },
+  rules: TripRules,
+): TripFare => taxed(outstationFinalPlain(s, usage, rules), rules.taxBp);

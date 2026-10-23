@@ -136,6 +136,7 @@ export async function startTestEnv(
   appOverrides: {
     authRateLimitMax?: number;
     bookingRateLimitMax?: number;
+    locationsPerMinute?: number;
     dispatchConfig?: Partial<DispatchConfig>;
     featureDefaults?: Partial<import('../src/modules/flags/flags.service').FlagDefaults>;
     safetyAckWindowMs?: number;
@@ -154,12 +155,17 @@ export async function startTestEnv(
     monitorConfig?: Partial<import('../src/modules/monitoring/monitor.service').MonitorConfig>;
     financeConfig?: Partial<FinanceConfig>;
     devPayments?: boolean;
+    /** Replace the fake storage (for example with the real local-disk one). */
+    storage?: import('../src/providers').StorageProvider;
   } = {},
 ): Promise<TestEnv> {
   // Opt-in: TEST_MONGO_URI runs the suite against a real MongoDB (each file gets a throwaway
   // database that is dropped afterwards). Default is the in-memory server.
   const realUri = process.env['TEST_MONGO_URI'];
-  const mongod = realUri ? null : await MongoMemoryServer.create();
+  // Starting the in-memory server can fail on a busy CI machine (port or binary start-up); try once more.
+  const mongod = realUri
+    ? null
+    : await MongoMemoryServer.create().catch(() => MongoMemoryServer.create());
   // Unique per environment: even if two files ever shared a server they could not touch each other's data.
   const dbName = `test_${randomBytes(6).toString('hex')}`;
   await mongoose.connect(realUri ?? mongod!.getUri(), { dbName });
@@ -301,6 +307,7 @@ export async function startTestEnv(
   }) as typeof fetch;
   const providers = {
     ...baseProviders,
+    ...(appOverrides.storage ? { storage: appOverrides.storage } : {}),
     payments: createRazorpayPayments({
       keyId: razorpay.keyId,
       keySecret: KEY_SECRET,
@@ -337,6 +344,7 @@ export async function startTestEnv(
     rateLimitMax: 100_000,
     authRateLimitMax: appOverrides.authRateLimitMax ?? 100_000,
     bookingRateLimitMax: appOverrides.bookingRateLimitMax ?? 100_000,
+    locationsPerMinute: appOverrides.locationsPerMinute ?? 100_000,
     callerWriteLimitPerMinute: appOverrides.callerWriteLimitPerMinute ?? 100_000,
     couponGuessLimit: appOverrides.couponGuessLimit ?? 100_000,
     ...(appOverrides.metricsToken ? { metricsToken: appOverrides.metricsToken } : {}),

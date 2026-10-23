@@ -7,7 +7,12 @@ import { objectId } from '../../common/zod';
 import { requireRole } from '../../middleware/auth';
 import type { ModuleContext } from '../../context';
 import { idempotencyKeySchema } from '../bookings/bookings.schemas';
-import { cashCollectedSchema, cashDepositSchema, type CashService } from '../cash/cash.service';
+import {
+  cashCollectedSchema,
+  cashDepositSchema,
+  customerCashConfirmSchema,
+  type CashService,
+} from '../cash/cash.service';
 import {
   createCommissionSchema,
   listCommissionQuerySchema,
@@ -130,6 +135,17 @@ export function financeRouter(
         uid(req),
         rideIdSchema.parse(req.params['rideId']),
         cashCollectedSchema.parse(req.body),
+      ),
+    })),
+  );
+  r.post(
+    '/rides/:rideId/cash-collection/customer-confirm',
+    ...customer,
+    h(async (req) => ({
+      data: await s.cash.customerConfirm(
+        actorFrom(req),
+        rideIdSchema.parse(req.params['rideId']),
+        customerCashConfirmSchema.parse(req.body),
       ),
     })),
   );

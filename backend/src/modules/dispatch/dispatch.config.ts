@@ -76,6 +76,23 @@ export type DispatchConfig = {
   rentalGraceKm: number;
   /** One-way outstation: the real distance is charged only if it is this much more than quoted (2000 = 20%). */
   oneWayDetourBp: number;
+  /**
+   * City rides: QUOTED bills the distance the rider was quoted (the measured trail is only recorded);
+   * RECONCILED bills the measured trail when it is clearly longer or shorter. Placeholder policy.
+   */
+  cityDistanceBilling: 'QUOTED' | 'RECONCILED';
+  /** RECONCILED: longer than quoted by more than this (2000 = 20%) is a detour. */
+  cityDetourBp: number;
+  /** RECONCILED: shorter than quoted by more than this is an early finish. */
+  cityShortBp: number;
+  /** RECONCILED: never bill below this share of the quoted distance (5000 = 50%). */
+  cityFloorBp: number;
+  /** RECONCILED: never bill above this share of the quoted distance (20000 = 2x). */
+  cityCeilingBp: number;
+  /** A trail with fewer recorded points than this is not trusted. */
+  cityMinPings: number;
+  /** A trail this far from the quote (either way) is logged as DISTANCE_MISMATCH for staff, in any mode. */
+  cityFlagBp: number;
   /** The longest round trip that can be booked, in days. */
   outstationMaxDays: number;
   /** A ride still in progress after this many hours (rentals and outstation: beyond their booked time) is flagged. */
@@ -121,6 +138,13 @@ export const defaultDispatchConfig: DispatchConfig = {
   rentalGraceMinutes: 10,
   rentalGraceKm: 2,
   oneWayDetourBp: 2000,
+  cityDistanceBilling: 'QUOTED',
+  cityDetourBp: 2000,
+  cityShortBp: 2000,
+  cityFloorBp: 5000,
+  cityCeilingBp: 20_000,
+  cityMinPings: 5,
+  cityFlagBp: 3000,
   outstationMaxDays: 30,
   tripOverrunHours: 6,
 };

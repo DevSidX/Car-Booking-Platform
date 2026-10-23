@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { encodePolyline } from '../common/geo';
 import { InvalidPushTokenError, type LatLng, type Providers, type PushPayload } from './types';
 
 /**
@@ -41,13 +42,38 @@ export function createMockProviders(options: MockOptions = {}): Providers {
       async route(origin, destination) {
         // Straight-line x1.3 road factor, 30 km/h average. Dev-only approximation.
         const distanceMeters = Math.round(haversineMeters(origin, destination) * 1.3);
-        return { distanceMeters, durationSeconds: Math.round(distanceMeters / (30_000 / 3600)) };
+        return {
+          distanceMeters,
+          durationSeconds: Math.round(distanceMeters / (30_000 / 3600)),
+          polyline: encodePolyline([origin, destination]),
+        };
       },
       async geocode() {
         return null;
       },
       async reverseGeocode(point) {
         return `Mock address (${point.lat.toFixed(4)}, ${point.lng.toFixed(4)})`;
+      },
+      async autocomplete(input) {
+        const text = input.trim();
+        if (text.length === 0) return [];
+        return [
+          {
+            placeId: 'mock-place-1',
+            description: `${text}, New Delhi, Delhi, India (mock)`,
+            mainText: text,
+            secondaryText: 'New Delhi, Delhi, India (mock)',
+          },
+        ];
+      },
+      async place(placeId) {
+        if (placeId !== 'mock-place-1') return null;
+        // Connaught Place, New Delhi.
+        return {
+          point: { lat: 28.6315, lng: 77.2167 },
+          address: 'Connaught Place, New Delhi, Delhi, India (mock)',
+          name: 'Connaught Place',
+        };
       },
     },
     sms: {

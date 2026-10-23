@@ -16,7 +16,7 @@ const schema = z.object({
     ),
   MONGODB_URI: z.string().min(1),
   MONGO_MAX_POOL_SIZE: z.coerce.number().int().min(5).max(200).default(20),
-  // Nothing uses Redis yet (dispatch runs on a DB sweeper). Optional outside production until P4.
+  // Shared rate-limit counts and Socket.IO fan-out across instances. Optional outside production; the API works without it.
   REDIS_URL: z.string().optional(),
   JWT_ACCESS_SECRET: z.string().min(32, 'must be at least 32 characters'),
   JWT_REFRESH_SECRET: z.string().min(32, 'must be at least 32 characters'),
@@ -42,12 +42,23 @@ const schema = z.object({
   // Tax on company invoices, in basis points (1800 = 18%). 0 = none. Decide with an accountant.
   INVOICE_TAX_BP: z.coerce.number().int().min(0).max(5000).default(0),
   INVOICE_TAX_LABEL: z.string().default('GST'),
+  // GST added ON TOP of every ride fare, in basis points (500 = 5%), and GST on the platform's commission
+  // (1800 = 18%), borne by the driver. PLACEHOLDERS: confirm both rates and who is liable with an accountant.
+  // 0 turns a tax off. Keep INVOICE_TAX_BP at 0 while RIDE_TAX_BP is on, or company invoices tax twice.
+  RIDE_TAX_BP: z.coerce.number().int().min(0).max(5000).default(500),
+  COMMISSION_TAX_BP: z.coerce.number().int().min(0).max(5000).default(1800),
   SELLER_NAME: z.string().default('Cab Booking Platform'),
   SELLER_GSTIN: z.string().optional(),
   SELLER_ADDRESS: z.string().optional(),
   SELLER_SAC_CODE: z.string().optional(),
-  // mock = files are not really stored; s3 = any S3-compatible storage (AWS S3, Cloudflare R2, MinIO).
-  STORAGE_DRIVER: z.enum(['mock', 's3']).default('mock'),
+  // mock = files are not really stored; local = the server's own upload folder (one instance only);
+  // s3 = any S3-compatible storage (AWS S3, Cloudflare R2, MinIO).
+  STORAGE_DRIVER: z.enum(['mock', 'local', 's3']).default('mock'),
+  UPLOAD_DIR: z.string().optional(),
+  // Public address of this API with no path (https://api.example.com): upload/download links are built on it.
+  UPLOAD_PUBLIC_URL: z.string().url().optional(),
+  UPLOAD_SIGNING_SECRET: z.string().min(32, 'must be at least 32 characters').optional(),
+  UPLOAD_MAX_BYTES: z.coerce.number().int().min(1024).max(52_428_800).default(10_485_760),
   S3_ENDPOINT: z.string().url().optional(),
   S3_BUCKET: z.string().optional(),
   S3_REGION: z.string().default('auto'),
@@ -57,6 +68,9 @@ const schema = z.object({
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .optional(),
+  // mock = straight-line distance x1.3 (development only); google = Google Maps Platform (needs GOOGLE_MAPS_API_KEY).
+  MAPS_DRIVER: z.enum(['mock', 'google']).default('mock'),
+  GOOGLE_MAPS_API_KEY: z.string().optional(),
   // mock = emails are only recorded; smtp = real email (needs the SMTP_* values and EMAIL_FROM).
   EMAIL_DRIVER: z.enum(['mock', 'smtp']).default('mock'),
   SMTP_HOST: z.string().optional(),
@@ -166,6 +180,17 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       'LOAD_TEST_MODE: not allowed in production (it removes the rate limits)',
     ]);
   }
+  if (env.MAPS_DRIVER === 'google' && !env.GOOGLE_MAPS_API_KEY) {
+    throw new EnvValidationError(['MAPS_DRIVER=google needs GOOGLE_MAPS_API_KEY']);
+  }
+  if (env.STORAGE_DRIVER === 'local') {
+    const missing = (['UPLOAD_DIR', 'UPLOAD_PUBLIC_URL', 'UPLOAD_SIGNING_SECRET'] as const).filter(
+      (k) => !env[k],
+    );
+    if (missing.length > 0) {
+      throw new EnvValidationError([`STORAGE_DRIVER=local needs ${missing.join(', ')}`]);
+    }
+  }
   if (env.STORAGE_DRIVER === 's3') {
     const missing = (
       ['S3_ENDPOINT', 'S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'] as const
@@ -218,11 +243,30 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       'PAYMENTS_DRIVER=razorpay needs RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET',
     ]);
   }
+  if (env.RIDE_TAX_BP > 0 && env.INVOICE_TAX_BP > 0) {
+    throw new EnvValidationError([
+      'INVOICE_TAX_BP: must be 0 while RIDE_TAX_BP is on (the tax is already inside each ride, so an invoice would charge it twice)',
+    ]);
+  }
   if (env.NODE_ENV === 'production' && env.STAGING_FIXED_OTP) {
     throw new EnvValidationError(['STAGING_FIXED_OTP: not allowed in production']);
   }
   if (env.NODE_ENV === 'production' && !env.REDIS_URL) {
     throw new EnvValidationError(['REDIS_URL: required in production']);
+  }
+  if (env.PROVIDER_MODE === 'live') {
+    const problems: string[] = [];
+    if (env.PAYMENTS_DRIVER === 'mock')
+      problems.push('PAYMENTS_DRIVER: must be razorpay in live mode');
+    if (env.PAYOUTS_DRIVER === 'mock')
+      problems.push('PAYOUTS_DRIVER: must be razorpayx in live mode');
+    if (env.SMS_DRIVER === 'mock') problems.push('SMS_DRIVER: must be nimbus in live mode');
+    if (env.PUSH_DRIVER === 'mock') problems.push('PUSH_DRIVER: must be fcm in live mode');
+    if (env.EMAIL_DRIVER === 'mock') problems.push('EMAIL_DRIVER: must be smtp in live mode');
+    if (env.MAPS_DRIVER === 'mock') problems.push('MAPS_DRIVER: must be google in live mode');
+    if (env.STORAGE_DRIVER === 'mock')
+      problems.push('STORAGE_DRIVER: must be local or s3 in live mode');
+    if (problems.length > 0) throw new EnvValidationError(problems);
   }
   return env;
 }

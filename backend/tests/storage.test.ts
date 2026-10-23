@@ -121,6 +121,11 @@ describe('driver documents', () => {
       .send({ status: 'APPROVED' });
   };
 
+  it('the signed-file endpoints answer 404 when the server does not use local storage', async () => {
+    expect((await api().get('/api/v1/files/download?key=a')).status).toBe(404);
+    expect((await api().put('/api/v1/files/upload?key=a').send('x')).status).toBe(404);
+  });
+
   it('staff cannot approve a document whose file was never uploaded', async () => {
     const { driverId, id } = await newDriverWithDocument();
     const res = await approve(driverId, id);

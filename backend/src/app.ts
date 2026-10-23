@@ -1,4 +1,4 @@
-import express, { type Express } from 'express';
+import express, { type Express, type RequestHandler } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { pinoHttp } from 'pino-http';
@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 import { AppError } from './common/errors';
 import type { Providers } from './providers';
+import type { LocalFilesHandlers } from './providers/local';
 import type { ModuleContext } from './context';
 import { authenticate } from './middleware/auth';
 import { createAuditService } from './modules/audit/audit.service';
@@ -76,6 +77,8 @@ import { createBalancesService } from './modules/balances/balances.service';
 import { financeRouter } from './modules/balances/finance.routes';
 import { createQuotesService } from './modules/quotes/quotes.service';
 import { quotesRouter } from './modules/quotes/quotes.routes';
+import { createLocationsService } from './modules/locations/locations.service';
+import { locationsRouter } from './modules/locations/locations.routes';
 import { createBookingsService } from './modules/bookings/bookings.service';
 import { bookingsRouter } from './modules/bookings/bookings.routes';
 import { defaultDispatchConfig, type DispatchConfig } from './modules/dispatch/dispatch.config';
@@ -108,6 +111,8 @@ export type AppDeps = {
   dispatchConfig?: Partial<DispatchConfig>;
   /** Per-user cap per minute on quote/booking creation. */
   bookingRateLimitMax?: number;
+  /** Address-search / route-preview calls one signed-in user may make per minute. Default 60. */
+  locationsPerMinute?: number;
   /** Live-event delivery to connected apps. Defaults to a no-op (REST still works everywhere). */
   realtimeBus?: RealtimeBus;
   /** Money policies (commission, unpaid-ride blocking, cash limit). Defaults are placeholders. */
@@ -192,6 +197,18 @@ export function createApp(deps: AppDeps): Express {
       res.status(200).json({ success: true, data: { received: true, outcome: result.outcome } });
     },
   );
+  // Signed file links (server upload folder). The body is the file itself, streamed to disk, so these
+  // sit before the JSON parser. Without local storage both answer 404.
+  const localFiles = (deps.providers.storage as { handlers?: LocalFilesHandlers }).handlers;
+  const noLocalFiles: RequestHandler = () => {
+    throw new AppError('NOT_FOUND');
+  };
+  const noStore: RequestHandler = (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  };
+  app.put('/api/v1/files/upload', noStore, localFiles?.upload ?? noLocalFiles);
+  app.get('/api/v1/files/download', noStore, localFiles?.download ?? noLocalFiles);
   app.use(express.json({ limit: '100kb' }));
 
   const v1 = express.Router();
@@ -292,6 +309,7 @@ export function createApp(deps: AppDeps): Express {
   const dispatchConfig: DispatchConfig = { ...defaultDispatchConfig, ...deps.dispatchConfig };
   const trips = createTripsService({ audit: ctx.audit, zones });
   const quotes = createQuotesService({
+    taxBp: deps.financeConfig?.rideTaxBp ?? defaultFinanceConfig.rideTaxBp,
     trips,
     outstationMaxDays: dispatchConfig.outstationMaxDays,
     zones,
@@ -434,6 +452,13 @@ export function createApp(deps: AppDeps): Express {
   v1.use(pricingRouter(ctx, pricing));
   v1.use(cancellationPolicyRouter(ctx, cancellationPolicy));
   v1.use(quotesRouter(ctx, quotes, writeLimiter));
+  v1.use(
+    locationsRouter(
+      ctx,
+      createLocationsService({ maps: deps.providers.maps }),
+      deps.locationsPerMinute,
+    ),
+  );
   v1.use(bookingsRouter(ctx, bookings, writeLimiter));
   v1.use(scheduledRouter(ctx, scheduled));
   v1.use(presenceRouter(ctx, presence));

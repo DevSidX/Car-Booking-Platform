@@ -97,6 +97,223 @@
       ]
     },
     {
+      "name": "Locations",
+      "item": [
+        {
+          "name": "POST /locations/autocomplete - Address suggestions while the rider or driver types. Send the same sessionToken (any 8-64 character id the app makes) for every keystroke of one search and for the place lookup that follows, so the search is billed once. near (the position of the user) puts close places first. Each suggestion has a placeId; send it to POST /locations/place to get coordinates. Limited per user per minute",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/locations/autocomplete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "locations",
+                "autocomplete"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"input\": \"connaught pl\",\n  \"sessionToken\": \"search-0001-abcdef\",\n  \"near\": {\n    \"lat\": 28.6315,\n    \"lng\": 77.2167\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /locations/place - The coordinates and address of a suggestion the user picked (from POST /locations/autocomplete). 404 if the place is unknown. Use the returned point as the pickup or drop of a fare quote",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/locations/place",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "locations",
+                "place"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"placeId\": \"ChIJxxxxxxxx\",\n  \"sessionToken\": \"search-0001-abcdef\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /locations/reverse-geocode - Names a spot on the map (the pin the user dropped). address is null when nothing is known there",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/locations/reverse-geocode",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "locations",
+                "reverse-geocode"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 28.6315,\n  \"lng\": 77.2167\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /routes/estimate - A route preview: road distance, time and the path (polyline in Google encoded format, null if unavailable). For drawing the trip on a map only. The price of a trip always comes from POST /fare-quotes, never from here",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/routes/estimate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "routes",
+                "estimate"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"origin\": {\n    \"lat\": 28.6315,\n    \"lng\": 77.2167\n  },\n  \"destination\": {\n    \"lat\": 28.5562,\n    \"lng\": 77.1\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Files",
+      "item": [
+        {
+          "name": "PUT /files/upload - Send a file to the signed link returned by POST /drivers/me/documents (server upload folder). Send the file bytes as the body with the same Content-Type that was declared. The link works for 10 minutes; the file must be a real JPEG, PNG or PDF within the size limit. No login token is needed: the link is the permission",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/files/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "files",
+                "upload"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "from the link",
+                  "disabled": false
+                },
+                {
+                  "key": "ct",
+                  "value": "from the link",
+                  "disabled": false
+                },
+                {
+                  "key": "exp",
+                  "value": "from the link",
+                  "disabled": false
+                },
+                {
+                  "key": "sig",
+                  "value": "from the link",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /files/download - Download a file through a signed link (for example the one staff get when they open a driver document). The link works for 5 minutes. The file is always sent as a download, never shown as a page",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/files/download",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "files",
+                "download"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "from the link",
+                  "disabled": false
+                },
+                {
+                  "key": "exp",
+                  "value": "from the link",
+                  "disabled": false
+                },
+                {
+                  "key": "sig",
+                  "value": "from the link",
+                  "disabled": false
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "Auth",
       "item": [
         {
@@ -2864,6 +3081,40 @@
           }
         },
         {
+          "name": "POST /rides/{rideId}/cash-collection/customer-confirm - The rider says how much cash they handed to the driver (optional). It never moves money: the driver confirming the exact fare is what settles the ride. If the amount differs from the fare it is recorded as a cash dispute and audited for staff. Repeating the same amount is fine; a different amount afterwards is refused (409). Cash rides only, after the ride is completed, within 7 days",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rides/{{rideId}}/cash-collection/customer-confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rides",
+                "{{rideId}}",
+                "cash-collection",
+                "customer-confirm"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountPaise\": 25000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "GET /drivers/me/balance - Cash held, what the platform owes the driver, the net (positive = driver owes the platform), the cash limit, and any open settlement",
           "request": {
             "method": "GET",
@@ -4691,6 +4942,25 @@
                 "admin",
                 "system",
                 "health"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "POST /admin/system/test-alert - Sends a harmless TEST ALERT through the real alert path (the log and, if ALERT_WEBHOOK_URL is set, the Slack/Discord webhook). Answers webhookConfigured and delivered (true only if the webhook accepted it). Use it after setting the webhook, and after any change to it. Audited",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/system/test-alert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "system",
+                "test-alert"
               ],
               "query": []
             }

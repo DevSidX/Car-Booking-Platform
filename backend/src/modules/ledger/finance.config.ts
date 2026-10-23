@@ -30,6 +30,17 @@ export type FinanceConfig = {
    */
   invoiceTaxBp: number;
   invoiceTaxLabel: string;
+  /**
+   * Tax (GST) added ON TOP of every ride fare, in basis points (500 = 5%). The rider pays fare + tax;
+   * driver pay, commission and coupons are worked out on the fare before tax; the tax is held in
+   * TAX_PAYABLE for the tax office. 0 = no tax. PLACEHOLDER: confirm the rate with an accountant.
+   */
+  rideTaxBp: number;
+  /**
+   * Tax charged on the platform's commission, in basis points (1800 = 18%). The driver bears it: it is
+   * taken out of their share and held in TAX_PAYABLE; the platform keeps its full commission. 0 = none.
+   */
+  commissionTaxBp: number;
   /** Who the invoice is from (printed on it). */
   seller: { name: string; gstin: string | null; address: string | null; sacCode: string | null };
   /** Pay out an approved settlement automatically (a background job), instead of waiting for finance. */
@@ -50,6 +61,8 @@ export const defaultFinanceConfig: FinanceConfig = {
   walletMaxBalancePaise: 1_000_000,
   autoPayouts: false,
   invoiceTaxBp: 0,
+  rideTaxBp: 0,
+  commissionTaxBp: 0,
   invoiceTaxLabel: 'GST',
   seller: { name: 'Cab Booking Platform', gstin: null, address: null, sacCode: null },
   walletBonusBp: 0,

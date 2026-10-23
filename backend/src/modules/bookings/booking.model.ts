@@ -177,6 +177,10 @@ const bookingSchema = new Schema(
           discountPaise: { type: Number },
           commissionPaise: { type: Number, required: true },
           driverSharePaise: { type: Number, required: true },
+          // Tax charged to the rider on top of the fare (inside amountPaise/grossPaise), and tax on the
+          // commission taken out of the driver's share.
+          taxPaise: { type: Number },
+          commissionTaxPaise: { type: Number },
           at: { type: Date, required: true },
         },
         { _id: false },
@@ -204,12 +208,27 @@ const bookingSchema = new Schema(
       default: undefined,
     },
     grossFarePaise: { type: Number },
+    // Tax inside the gross fare (added on top of the fare). 0 when tax is off.
+    taxPaise: { type: Number },
     discountPaise: { type: Number },
     // What settled the booking: a payment public id (online), "CASH:<driverId>", or a staff action.
     paidBy: { type: String },
     paidAt: { type: Date },
     // Set once a cash collection has been recorded in the ledger.
     cashRecordedAt: { type: Date },
+    // What the rider says they handed over (optional acknowledgement; it never moves money).
+    customerCashConfirmation: {
+      type: new Schema(
+        {
+          amountPaise: { type: Number, required: true },
+          at: { type: Date, required: true },
+          // False = the rider's amount differs from the fare: a cash dispute for staff to look at.
+          matchesFare: { type: Boolean, required: true },
+        },
+        { _id: false },
+      ),
+      default: undefined,
+    },
     // Set once a waived fee has been recorded in the ledger.
     feeWaiverRecordedAt: { type: Date },
     destinationChange: { type: destinationChangeSchema, default: undefined },

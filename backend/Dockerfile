@@ -14,6 +14,11 @@ WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# Folder for STORAGE_DRIVER=local (driver documents). Mount a persistent volume here, or the files
+# are lost when the container is replaced. One server instance only while storage is local.
+RUN mkdir -p /data/uploads && chown node:node /data/uploads
+ENV UPLOAD_DIR=/data/uploads
+VOLUME ["/data/uploads"]
 # Run as the unprivileged user that ships with the node image.
 USER node
 EXPOSE 4000

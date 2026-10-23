@@ -136,6 +136,9 @@ export function createLedgerService(deps: {
       discountPaise?: number;
       commissionPaise: number;
       driverSharePaise: number;
+      /** Tax charged to the rider on top of the fare, and tax on the commission taken from the driver. */
+      taxPaise?: number;
+      commissionTaxPaise?: number;
     },
   ) {
     await Booking.updateOne(
@@ -149,19 +152,27 @@ export function createLedgerService(deps: {
     const b = await Booking.findById(bookingId).lean();
     if (!b || b.status !== 'COMPLETED' || !b.assignedDriverId || !b.finalFarePaise) return false;
     if (b.accrual?.at) return false;
-    // The driver's share and the commission are worked out on the FULL fare; the rider owes the
-    // fare less any coupon discount, which the platform pays for (the PROMOTIONS account).
+    // The driver's share and the commission are worked out on the FULL fare before tax; the rider
+    // owes the fare plus tax less any coupon discount, which the platform pays for (PROMOTIONS).
     const grossPaise = b.grossFarePaise ?? b.finalFarePaise;
     const discountPaise = b.discountPaise ?? 0;
+    const taxPaise = b.taxPaise ?? 0;
     if (b.finalFarePaise + discountPaise !== grossPaise) {
       throw new Error(
         `Fare does not add up for ${b.publicId}: ${b.finalFarePaise} + ${discountPaise} != ${grossPaise}`,
       );
     }
-    const { commissionPaise, driverSharePaise } = splitAmount(
-      grossPaise,
+    const { commissionPaise, driverSharePaise: shareBeforeTax } = splitAmount(
+      grossPaise - taxPaise,
       b.commission?.rateBp ?? config.defaultCommissionBp,
     );
+    // Tax on the commission is the driver's to bear: it comes out of their share and is held for the tax office.
+    const commissionTaxPaise = Math.min(
+      shareBeforeTax,
+      Math.round((commissionPaise * config.commissionTaxBp) / 10_000),
+    );
+    const driverSharePaise = shareBeforeTax - commissionTaxPaise;
+    const taxHeldPaise = taxPaise + commissionTaxPaise;
     const entries: LedgerEntry[] = [
       { account: receivableOf(b), amountPaise: b.finalFarePaise },
       {
@@ -171,6 +182,7 @@ export function createLedgerService(deps: {
       ...(commissionPaise > 0
         ? [{ account: Accounts.commission, amountPaise: -commissionPaise }]
         : []),
+      ...(taxHeldPaise > 0 ? [{ account: Accounts.taxPayable, amountPaise: -taxHeldPaise }] : []),
       ...(discountPaise > 0 ? [{ account: Accounts.promotions, amountPaise: discountPaise }] : []),
     ];
     await post({
@@ -191,6 +203,8 @@ export function createLedgerService(deps: {
       discountPaise,
       commissionPaise,
       driverSharePaise,
+      ...(taxPaise > 0 ? { taxPaise } : {}),
+      ...(commissionTaxPaise > 0 ? { commissionTaxPaise } : {}),
     });
     return true;
   }

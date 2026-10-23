@@ -243,6 +243,8 @@ export async function receiptView(viewer: Viewer, bookingRaw: unknown, rideRaw: 
         amountPaise: bd['minimumFareAdjustmentPaise'] ?? 0,
       },
       { code: 'ROUNDING', label: 'Rounding', amountPaise: bd['roundingAdjustmentPaise'] ?? 0 },
+      // Tax added on top of the fare (GST). Only shown when there is some.
+      { code: 'TAX', label: 'GST', amountPaise: bd['taxPaise'] ?? 0 },
     ];
     // Show a line when it has an amount, but always the base fare.
     lines.push(...all.filter((l) => l.code === 'BASE' || l.amountPaise !== 0));

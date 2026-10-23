@@ -26,3 +26,27 @@ export function haversineMeters(
     Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
+
+/** Google "encoded polyline" (precision 5) of a list of points. */
+export function encodePolyline(points: { lat: number; lng: number }[]): string {
+  let out = '';
+  let prevLat = 0;
+  let prevLng = 0;
+  const chunk = (value: number) => {
+    let v = value < 0 ? ~(value << 1) : value << 1;
+    while (v >= 0x20) {
+      out += String.fromCharCode((0x20 | (v & 0x1f)) + 63);
+      v >>= 5;
+    }
+    out += String.fromCharCode(v + 63);
+  };
+  for (const p of points) {
+    const lat = Math.round(p.lat * 1e5);
+    const lng = Math.round(p.lng * 1e5);
+    chunk(lat - prevLat);
+    chunk(lng - prevLng);
+    prevLat = lat;
+    prevLng = lng;
+  }
+  return out;
+}

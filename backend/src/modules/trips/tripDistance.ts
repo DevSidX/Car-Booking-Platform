@@ -4,22 +4,25 @@ import { LocationPing } from '../tracking/locationPing.model';
 
 type Pt = { lat: number; lng: number; at: Date; accuracy?: number | undefined };
 
+type TrailOptions = {
+  start?: { lat: number; lng: number; at: Date } | null;
+  end?: { lat: number; lng: number; at: Date } | null;
+  maxSpeedMps: number;
+  maxAccuracyMeters: number;
+  /** Only count points taken while the booking was in this status (the trip itself, not the drive to the pickup). */
+  bookingStatus?: string;
+};
+
 /**
  * How far a ride really went, from the route trail the SERVER recorded (never a number typed in
  * by the driver or rider). Small jitters and impossible jumps (a bad GPS fix) are ignored, and
  * the start and end positions are added so the first and last stretch are counted.
+ * `pings` is how many recorded points the trail had, so a caller can tell a thin trail from a good one.
  */
-export async function trailMeters(
+export async function trailSummary(
   bookingId: Types.ObjectId,
-  opts: {
-    start?: { lat: number; lng: number; at: Date } | null;
-    end?: { lat: number; lng: number; at: Date } | null;
-    maxSpeedMps: number;
-    maxAccuracyMeters: number;
-    /** Only count points taken while the booking was in this status (the trip itself, not the drive to the pickup). */
-    bookingStatus?: string;
-  },
-): Promise<number> {
+  opts: TrailOptions,
+): Promise<{ meters: number; pings: number }> {
   const rows = await LocationPing.find({
     bookingId,
     ...(opts.bookingStatus ? { bookingStatus: opts.bookingStatus } : {}),
@@ -29,13 +32,19 @@ export async function trailMeters(
     .lean();
   const points: Pt[] = [];
   if (opts.start) points.push({ ...opts.start });
+  let pings = 0;
   for (const r of rows) {
     if (!r.location) continue;
     const [lng, lat] = r.location.coordinates as [number, number];
     points.push({ lat, lng, at: r.recordedAt, accuracy: r.accuracyMeters ?? undefined });
+    pings += 1;
   }
   if (opts.end) points.push({ ...opts.end });
-  return sumPath(points, opts.maxSpeedMps, opts.maxAccuracyMeters);
+  return { meters: sumPath(points, opts.maxSpeedMps, opts.maxAccuracyMeters), pings };
+}
+
+export async function trailMeters(bookingId: Types.ObjectId, opts: TrailOptions): Promise<number> {
+  return (await trailSummary(bookingId, opts)).meters;
 }
 
 /** Pure part, exported for tests. */
