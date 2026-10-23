@@ -129,7 +129,8 @@ export function createNotificationsService(deps: {
         Notification.countDocuments(filter),
         Notification.countDocuments({ userId, readAt: null }),
         Notification.find(filter)
-          .sort({ createdAt: -1 })
+          // _id breaks ties: notes created in the same millisecond keep their creation order.
+          .sort({ createdAt: -1, _id: -1 })
           .skip((page - 1) * limit)
           .limit(limit)
           .lean(),

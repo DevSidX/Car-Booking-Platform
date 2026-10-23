@@ -24,7 +24,7 @@ let customer: Session;
 beforeAll(async () => {
   env = await startTestEnv();
 });
-afterAll(() => env.stop());
+afterAll(() => env?.stop());
 beforeEach(async () => {
   await env.reset();
   world = await seedWorld();

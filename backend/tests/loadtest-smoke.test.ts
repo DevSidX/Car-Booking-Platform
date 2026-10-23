@@ -54,7 +54,7 @@ describe('full-ride load script', () => {
         adminPhone,
         drivers: 2,
         riders: 2,
-        durationSeconds: 8,
+        durationSeconds: 15, // headroom: the full suite runs many test files at once
         locationIntervalMs: 500,
         offerPollMs: 200,
       });
