@@ -11,3 +11,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .next/
+
+# local load-test output
+backend/load-results.json

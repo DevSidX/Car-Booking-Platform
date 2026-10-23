@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { LatLng, Providers } from './types';
+import { InvalidPushTokenError, type LatLng, type Providers, type PushPayload } from './types';
 
 /**
  * Deterministic in-process fakes for local development and tests ONLY.
@@ -17,7 +17,24 @@ function haversineMeters(a: LatLng, b: LatLng): number {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-export function createMockProviders(): Providers {
+export type MockOptions = {
+  onOtp?: (phone: string, otp: string) => void;
+  /** Called for every text message the mock "sends" (emergency alerts). */
+  onText?: (phone: string, message: string) => void;
+  /**
+   * Files the mock storage "holds". Left out, every file is assumed to be there (so a developer
+   * without real storage can still approve documents); give a map to test the real checks.
+   */
+  objects?: Map<string, { sizeBytes: number; contentType: string }>;
+  /** Called for every email the mock "sends". */
+  onEmail?: (message: { to: string; subject: string; text: string }) => void;
+  /** Called for every push the mock "delivers". */
+  onPush?: (token: string, payload: PushPayload) => void;
+  /** Lets a test make a token fail: 'invalid' = dead token, 'error' = temporary outage. */
+  pushFailure?: (token: string) => 'invalid' | 'error' | undefined;
+};
+
+export function createMockProviders(options: MockOptions = {}): Providers {
   const orders = new Set<string>();
   return {
     maps: {
@@ -34,22 +51,54 @@ export function createMockProviders(): Providers {
       },
     },
     sms: {
-      async sendOtp() {
+      async sendOtp(phone, otp) {
+        options.onOtp?.(phone, otp);
+        return { providerMessageId: `mock_sms_${randomUUID()}` };
+      },
+      async sendText(phone, message) {
+        options.onText?.(phone, message);
         return { providerMessageId: `mock_sms_${randomUUID()}` };
       },
     },
+    email: {
+      async send({ to, subject, text }) {
+        options.onEmail?.({ to, subject, text });
+        return { providerMessageId: `mock_mail_${randomUUID()}` };
+      },
+    },
     push: {
-      async send() {
+      async send(token, payload) {
+        const failure = options.pushFailure?.(token);
+        if (failure === 'invalid') throw new InvalidPushTokenError();
+        if (failure === 'error') throw new Error('mock push outage');
+        options.onPush?.(token, payload);
         return { providerMessageId: `mock_push_${randomUUID()}` };
       },
     },
     payments: {
+      checkoutKey: 'mock_checkout_key',
       async createOrder() {
         const orderId = `mock_order_${randomUUID()}`;
         orders.add(orderId);
         return { orderId };
       },
       verifyPaymentSignature: () => false,
+      verifyWebhookSignature: () => false,
+      async createRefund() {
+        return { refundId: `mock_refund_${randomUUID()}`, status: 'pending' as const };
+      },
+    },
+    // Pretends to send money and always says "on its way"; a development route finishes it.
+    payouts: {
+      async createFundAccount() {
+        return { contactId: `mock_cont_${randomUUID()}`, fundAccountId: `mock_fa_${randomUUID()}` };
+      },
+      async createPayout() {
+        return { payoutId: `mock_payout_${randomUUID()}`, status: 'processing' as const };
+      },
+      async getPayout(payoutId) {
+        return { payoutId, status: 'processing' as const };
+      },
       verifyWebhookSignature: () => false,
     },
     storage: {
@@ -64,6 +113,14 @@ export function createMockProviders(): Providers {
           url: `http://localhost/mock-download/${encodeURIComponent(objectKey)}`,
           expiresInSeconds: 300,
         };
+      },
+      async statObject(objectKey) {
+        if (!options.objects) return { exists: true as const, sizeBytes: 100_000 };
+        const o = options.objects.get(objectKey);
+        return o ? { exists: true as const, ...o } : { exists: false as const };
+      },
+      async deleteObject(objectKey) {
+        options.objects?.delete(objectKey);
       },
     },
   };
