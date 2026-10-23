@@ -221,6 +221,7 @@ export function createReportsService(deps: { audit: AuditService; now: () => Dat
           ]),
           Booking.aggregate<{
             gross: number;
+            tax: number;
             discounts: number;
             commission: number;
             driverShare: number;
@@ -238,6 +239,11 @@ export function createReportsService(deps: { audit: AuditService; now: () => Dat
                       { $ifNull: ['$grossFarePaise', { $ifNull: ['$finalFarePaise', 0] }] },
                       0,
                     ],
+                  },
+                },
+                tax: {
+                  $sum: {
+                    $cond: [{ $eq: ['$status', 'COMPLETED'] }, { $ifNull: ['$taxPaise', 0] }, 0],
                   },
                 },
                 discounts: { $sum: { $ifNull: ['$discountPaise', 0] } },
@@ -325,7 +331,10 @@ export function createReportsService(deps: { audit: AuditService; now: () => Dat
         },
         money: {
           currency: 'INR',
+          // Gross includes the ride GST; net is the fare before that tax.
           grossFaresPaise: money[0]?.gross ?? 0,
+          taxPaise: money[0]?.tax ?? 0,
+          netFaresPaise: (money[0]?.gross ?? 0) - (money[0]?.tax ?? 0),
           discountsPaise: money[0]?.discounts ?? 0,
           commissionPaise: money[0]?.commission ?? 0,
           driverEarningsPaise: money[0]?.driverShare ?? 0,

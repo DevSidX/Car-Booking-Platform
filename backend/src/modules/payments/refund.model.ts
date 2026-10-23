@@ -17,6 +17,8 @@ const refundSchema = new Schema(
     idempotencyKey: { type: String, required: true, unique: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
     processedAt: { type: Date },
+    // Ride GST handed back with this refund (a credit note). Fixed once, so a retry posts the same amount.
+    taxReversedPaise: { type: Number, min: 0 },
   },
   { timestamps: true },
 );

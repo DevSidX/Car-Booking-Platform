@@ -235,6 +235,7 @@ export function createAnalyticsService(deps: { now: () => Date }) {
           _id: string;
           rides: number;
           gross: number;
+          tax: number;
           discounts: number;
           commission: number;
           earnings: number;
@@ -247,6 +248,7 @@ export function createAnalyticsService(deps: { now: () => Date }) {
               gross: {
                 $sum: { $ifNull: ['$grossFarePaise', { $ifNull: ['$finalFarePaise', 0] }] },
               },
+              tax: { $sum: { $ifNull: ['$taxPaise', 0] } },
               discounts: { $sum: { $ifNull: ['$discountPaise', 0] } },
               commission: { $sum: { $ifNull: ['$accrual.commissionPaise', 0] } },
               earnings: { $sum: { $ifNull: ['$accrual.driverSharePaise', 0] } },
@@ -279,6 +281,8 @@ export function createAnalyticsService(deps: { now: () => Date }) {
         const row = days.get(d) ?? {
           rides: 0,
           grossFaresPaise: 0,
+          taxPaise: 0,
+          netFaresPaise: 0,
           discountsPaise: 0,
           commissionPaise: 0,
           driverEarningsPaise: 0,
@@ -292,6 +296,8 @@ export function createAnalyticsService(deps: { now: () => Date }) {
         Object.assign(slot(r._id), {
           rides: r.rides,
           grossFaresPaise: r.gross,
+          taxPaise: r.tax,
+          netFaresPaise: r.gross - r.tax,
           discountsPaise: r.discounts,
           commissionPaise: r.commission,
           driverEarningsPaise: r.earnings,
@@ -308,7 +314,10 @@ export function createAnalyticsService(deps: { now: () => Date }) {
         currency: 'INR',
         totals: {
           rides: sum('rides'),
+          // Gross includes the ride GST; net is the fare before that tax.
           grossFaresPaise: sum('grossFaresPaise'),
+          taxPaise: sum('taxPaise'),
+          netFaresPaise: sum('netFaresPaise'),
           discountsPaise: sum('discountsPaise'),
           commissionPaise: sum('commissionPaise'),
           driverEarningsPaise: sum('driverEarningsPaise'),

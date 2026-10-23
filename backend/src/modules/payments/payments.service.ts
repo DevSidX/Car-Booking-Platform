@@ -551,6 +551,48 @@ export function createPaymentsService(deps: {
 
   /* ---------------- refunds ---------------- */
 
+  /**
+   * The ride GST that goes back with a refund: the refunded share of the payment, of the tax charged on
+   * the ride. Only fare payments carry ride tax (fees, tips and top-ups do not). Worked out once and kept
+   * on the refund, and never more than the tax still held, so the refunds of one payment add up to at most
+   * the tax charged.
+   */
+  async function taxReversedBy(
+    refund: {
+      _id: Types.ObjectId;
+      bookingId: Types.ObjectId;
+      paymentId: Types.ObjectId;
+      amountPaise: number;
+      taxReversedPaise?: number | null;
+    },
+    payment: { purpose: string; amountPaise: number },
+  ): Promise<number> {
+    if (refund.taxReversedPaise !== undefined && refund.taxReversedPaise !== null) {
+      return refund.taxReversedPaise;
+    }
+    let taxBack = 0;
+    if (payment.purpose === 'FARE') {
+      const booking = await Booking.findById(refund.bookingId).select('taxPaise').lean();
+      const charged = booking?.taxPaise ?? 0;
+      if (charged > 0) {
+        const [already] = await Refund.aggregate<{ total: number }>([
+          {
+            $match: { paymentId: refund.paymentId, status: 'PROCESSED', _id: { $ne: refund._id } },
+          },
+          { $group: { _id: null, total: { $sum: { $ifNull: ['$taxReversedPaise', 0] } } } },
+        ]);
+        const left = Math.max(0, charged - (already?.total ?? 0));
+        taxBack = Math.min(left, Math.round((refund.amountPaise * charged) / payment.amountPaise));
+      }
+    }
+    const stored = await Refund.findOneAndUpdate(
+      { _id: refund._id, taxReversedPaise: { $exists: false } },
+      { taxReversedPaise: taxBack },
+      { returnDocument: 'after' },
+    );
+    return (stored ?? (await Refund.findById(refund._id)))?.taxReversedPaise ?? taxBack;
+  }
+
   async function markRefundProcessed(refundId: Types.ObjectId): Promise<void> {
     const done = await Refund.findOneAndUpdate(
       { _id: refundId, status: 'REQUESTED' },
@@ -564,6 +606,7 @@ export function createPaymentsService(deps: {
     // Platform bears the refund: the driver's share is untouched. The money either leaves the
     // gateway, or stays with us and is credited to the rider's wallet.
     const toWallet = refund.destination === 'WALLET';
+    const taxBack = await taxReversedBy(refund, payment);
     await ledger.post({
       kind: 'REFUND',
       idempotencyKey: `refund:${refund.publicId}`,
@@ -572,7 +615,8 @@ export function createPaymentsService(deps: {
           account: toWallet ? Accounts.wallet(payment.customerId.toString()) : Accounts.gateway,
           amountPaise: -refund.amountPaise,
         },
-        { account: Accounts.refunds, amountPaise: refund.amountPaise },
+        { account: Accounts.refunds, amountPaise: refund.amountPaise - taxBack },
+        ...(taxBack > 0 ? [{ account: Accounts.taxPayable, amountPaise: taxBack }] : []),
       ],
       bookingId: refund.bookingId,
       bookingPublicId: payment.bookingPublicId!,
